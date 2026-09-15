@@ -23,7 +23,8 @@ if (isMainThread) {
   const deny = () => { networkAttempts++; throw new Error('SYNTHETIC_NETWORK_BLOCKED'); };
   http.request = deny; http.get = deny; https.request = deny; https.get = deny;
   net.connect = deny; net.createConnection = deny; globalThis.fetch = deny; syncBuiltinESMExports();
-  const api = await import('@actual-app/api');
+  const { loadPinnedActual } = await import('../src/actual/sdk-loader.mjs');
+  const api = await loadPinnedActual();
   const { ActualExecutor } = await import('../src/actual/executor.mjs');
   const { readEncryptedBackup } = await import('../src/backups/encrypted.mjs');
   let account, category, simple, parent, child, updates = 0;

@@ -19,7 +19,7 @@ Projeto novo. Baseline: Node.js 24, ESM, `@actual-app/api` 26.9.0 e `better-sqli
 | Intenções locais somente leitura | `ollama.test.mjs`, `queries.test.mjs`: schema fechado, IDs extras recusados e indisponibilidade | 1B |
 | Paginação e dados desatualizados | `queries.test.mjs`: total integral, novas leituras e cache somente com período/escopo iguais | 1B |
 | Categorização confirmada e desfazer | Journal, precondições, patch de campo único e recuperação | 1C |
-| Relatório diário e alertas | Agenda persistente, ocorrência única e mudanças de severidade | 1D |
+| Relatório diário e alertas | `scheduler.test.mjs`, `reports.test.mjs`, `alerts-domain.test.mjs`: ativação explícita, DST, recuperação, atomicidade, reavaliação e transições com histerese | 1D |
 | Recorrências confirmadas | Calendário, variações e pagamento vinculado | 2 |
 
 Gemini é uma fase opcional separada. E-mail, cofre, portais e automação sem confirmação são posteriores. O executor inicial não aceita pagamentos, transferências, exportação pelo chat nem métodos arbitrários.
@@ -33,3 +33,11 @@ O orçamento mensal é o envelope integral retornado pelo Actual e pode incluir 
 A preferência `/escopo` é uma atribuição local idempotente. No marco 1C, a categorização usa proposta persistida e confirmação explícita por comando ou callback; desfazer exige uma nova proposta. A execução real depende de `dryRun:false` e backups cifrados; o padrão simula a operação. Pais e filhos de split aparecem nas consultas e são bloqueados para escrita por limitação de preservação dos campos no SDK fixado. Detalhes de autorização e recuperação estão em [authorization.md](authorization.md) e [actual-contract.md](actual-contract.md).
 
 Os testes locais não substituem validação da imagem Linux/UID de produção, compatibilidade com o servidor Actual e demonstração controlada com o bot do responsável.
+
+## Limites do marco 1D
+
+`/relatorio` é uma consulta imediata. Diário e alertas periódicos só começam após ativação separada em `/preferencias`; nenhum modelo é necessário. A agenda considera o horário civil escolhido e mantém uma ocorrência por data civil; o relatório preserva a data financeira do instante agendado. O reinício recupera somente a última ocorrência devida de cada rotina. [Políticas de horário, cancelamento e persistência](scheduling.md).
+
+Anomalias são desvios estatísticos descritivos com ao menos oito observações comparáveis anteriores. Novos alvos usam os últimos 30 dias; a base e os alvos acompanhados usam a leitura de 12 meses. Ausência fora dessa cobertura, dado desconhecido, snapshot incompleto e Actual indisponível não comprovam resolução. Alertas dependem de transições persistidas e têm limite de 20 novos avisos por varredura; os excedentes continuam elegíveis para a próxima leitura. [Fórmulas e limites](reporting.md).
+
+Recorrências, calendário de vencimentos confirmado, Gemini, e-mail e cofre permanecem fora deste marco. Os testes da agenda usam relógio controlado e dados sintéticos; não constituem demonstração de mensagens agendadas no bot real.

@@ -49,7 +49,8 @@ if (isMainThread) {
   net.connect = denyNetwork; net.createConnection = denyNetwork;
   globalThis.fetch = denyNetwork;
   syncBuiltinESMExports();
-  const api = await import('@actual-app/api');
+  const { loadPinnedActual } = await import('../src/actual/sdk-loader.mjs');
+  const api = await loadPinnedActual();
   const { ActualExecutor } = await import('../src/actual/executor.mjs');
   const { analyzeSnapshot } = await import('../src/finance/analyze.mjs');
   const require = createRequire(import.meta.url);

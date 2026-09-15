@@ -7,7 +7,10 @@ const reasons = Object.freeze({
   approval_received: 'confirmação de uso único recebida',
   operation_result: 'registro do resultado da operação',
   operation_recovery: 'recuperação do registro após reinício',
-  command_error: 'falha no processamento do comando'
+  command_error: 'falha no processamento do comando',
+  report_preferences: 'preferências locais de relatório e alertas',
+  daily_report: 'relatório determinístico solicitado',
+  alert_transition: 'mudança de severidade confirmada em leitura completa'
 });
 
 // This wrapper is used before durable enqueue as well as at the action boundary.

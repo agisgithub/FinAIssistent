@@ -25,6 +25,8 @@ O job CI `node` verifica sintaxe e testes; o job `container` executa a mesma su�
 
 Os testes POSIX de permissões e symlink aparecem como ignorados no Windows. O teste de crash real do processo pode aparecer como ignorado se o sandbox do host bloquear criação de subprocessos (`EPERM`); o CI Linux deve executá-lo. O teste de contenção de conexões SQLite não depende de subprocesso e roda em ambos os ambientes.
 
+O SDK 26.9.0 é carregado com uma transformação restrita em memória que impede seu serviço automático de agendas durante consultas e escritas autorizadas. Uma divergência de versão, hash ou cache aborta com `ACTUAL_FAILED` antes de resolver segredos. Confira Node 24 e reinstale os artefatos exatos com `npm ci`; não remova a proteção nem altere `posts_transaction`/`lastScheduleRun` no orçamento para contornar a falha. Uma atualização do SDK exige revisão da fonte e o teste `test/sdk-safety.test.mjs`, junto dos testes de leitura/mutação. Detalhes e hash aprovado estão no [contrato Actual](actual-contract.md#proteção-contra-execução-automática-de-agendas).
+
 ## Códigos operacionais
 
 | Código | Ação |

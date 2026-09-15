@@ -2,16 +2,24 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { errorCode } from '../errors.mjs';
 import { acceptTelegramUpdate } from '../telegram/ingress.mjs';
 
-export async function processOneJob({ store, handler, telegram, logger }) {
+export async function processOneJob({ store, handler, telegram, logger, scheduler }) {
   const job = store.claimJob();
   if (!job) return false;
   try {
+    if (scheduler?.owns(job)) { await scheduler.runJob(job); return true; }
     if (job.payload.type === 'callback') {
       try { await telegram.answerCallbackQuery(job.payload.callbackId); } catch {}
     }
     const result = await handler(job.payload, job);
     store.completeJob(job.id, result);
   } catch (error) {
+    if (scheduler?.owns(job)) {
+      if (store.db.prepare('SELECT state FROM jobs WHERE id=?').get(job.id)?.state === 'done') return true;
+      // Scheduled failures are finalized with policy guards by the scheduler.
+      // If its durable commit failed, stop and recover the safe read after restart.
+      logger('job_failed', { code: errorCode(error), jobId: job.id });
+      throw error;
+    }
     const code = errorCode(error);
     store.failJob(job, code);
     logger('job_failed', { code, jobId: job.id });
@@ -19,10 +27,12 @@ export async function processOneJob({ store, handler, telegram, logger }) {
   return true;
 }
 
-export async function processOneDelivery({ store, telegram, logger }) {
+export async function processOneDelivery({ store, telegram, logger, scheduler }) {
+  scheduler?.tick();
   const row = store.claimOutbox();
   if (!row) return false;
   try {
+    if (scheduler && !scheduler.authorizeDelivery(row)) { store.finishOutbox(row.id, { state: 'failed' }); return true; }
     const messageId = await telegram.sendMessage(row.chat_id, row.payload);
     store.finishOutbox(row.id, { state: 'sent', messageId });
   } catch (error) {
@@ -34,7 +44,7 @@ export async function processOneDelivery({ store, telegram, logger }) {
   return true;
 }
 
-export async function runLoops({ config, store, handler, telegram, logger, signal: outerSignal }) {
+export async function runLoops({ config, store, handler, telegram, logger, scheduler, signal: outerSignal }) {
   const controller = new AbortController();
   const signal = AbortSignal.any([outerSignal, controller.signal]);
   const pause = async ms => { try { await sleep(ms, undefined, { signal }); } catch {} };
@@ -52,7 +62,7 @@ export async function runLoops({ config, store, handler, telegram, logger, signa
   };
   const consume = async fn => {
     while (!signal.aborted) {
-      const worked = await fn({ store, handler, telegram, logger });
+      const worked = await fn({ store, handler, telegram, logger, scheduler });
       if (!worked) await pause(150);
     }
   };
@@ -60,13 +70,16 @@ export async function runLoops({ config, store, handler, telegram, logger, signa
     let ticks = 0;
     while (!signal.aborted) {
       store.heartbeat();
-      if (ticks++ % 60 === 0) store.prune(config.retentionDays);
+      if (ticks++ % 60 === 0) { store.prune(config.retentionDays); scheduler?.repository.prune(config.retentionDays); }
       await pause(60000);
     }
   };
   const guarded = async fn => { try { return await fn(); } catch (error) { controller.abort(); throw error; } };
+  const schedule = async () => {
+    while (!signal.aborted) { scheduler.tick(); await pause(30000); }
+  };
   // A slow Actual read cannot block accepting updates or delivering messages.
-  const results = await Promise.allSettled([guarded(polling), guarded(() => consume(processOneJob)), guarded(() => consume(processOneDelivery)), guarded(maintenance)]);
+  const results = await Promise.allSettled([guarded(polling), guarded(() => consume(processOneJob)), guarded(() => consume(processOneDelivery)), guarded(maintenance), ...(scheduler ? [guarded(schedule)] : [])]);
   const failure = results.find(r => r.status === 'rejected');
   if (failure) throw failure.reason;
 }

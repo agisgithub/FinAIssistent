@@ -11,6 +11,7 @@ import { TelegramClient } from './telegram/client.mjs';
 import { ActualClient } from './actual/client.mjs';
 import { createCommandHandler } from './telegram/commands.mjs';
 import { runLoops } from './jobs/runtime.mjs';
+import { ReportScheduler } from './jobs/scheduler.mjs';
 
 export async function main({ config: injectedConfig, actual: injectedActual, telegram: injectedTelegram, signal: injectedSignal, logger = createLogger(), handlerFactory = createCommandHandler } = {}) {
   process.umask(0o077);
@@ -31,9 +32,10 @@ export async function main({ config: injectedConfig, actual: injectedActual, tel
     store.bindTelegramBot((await telegram.getMe()).id);
     await telegram.assertPollingAvailable();
     actual = injectedActual ?? new ActualClient(config);
-    const handler = handlerFactory({ config, store, actual });
+    const scheduler = new ReportScheduler({ config, store, actual });
+    const handler = handlerFactory({ config, store, actual, reportScheduler: scheduler });
     logger('started');
-    await runLoops({ config, store, handler, telegram, logger, signal });
+    await runLoops({ config, store, handler, telegram, logger, scheduler, signal });
   } finally {
     controller.abort();
     try { await actual?.close(); } finally {

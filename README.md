@@ -4,9 +4,11 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-Fases 0, 1A, 1B e 1C: um responsável, uma residência, um orçamento, consultas financeiras em centavos e categorização de um lançamento por proposta confirmada. A fila, as mensagens, as propostas e o registro de operações ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos e perguntas simples funcionam por regras locais; Ollama opcional interpreta outras perguntas de leitura.
+Fases 0 a 1D: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização de um lançamento por proposta confirmada e relatórios/alertas opcionais. A fila, as mensagens, as propostas, as operações e a agenda ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas funcionam por regras locais; Ollama opcional interpreta outras perguntas de leitura.
 
-O MVP ainda depende das fases de relatórios agendados, alertas e recorrências. E-mail, cofre, portais e Gemini são posteriores.
+O MVP ainda depende das recorrências confirmadas. E-mail, cofre, portais e Gemini são posteriores.
+
+O carregamento do SDK inclui uma [proteção verificada para a versão fixada](docs/actual-contract.md#proteção-contra-execução-automática-de-agendas): consultas não acionam o serviço automático de agendas do Actual. Uma versão ou arquivo diferente bloqueia o adaptador até nova revisão; não atualize o SDK isoladamente.
 
 ## Executar
 
@@ -37,6 +39,8 @@ Antes de conectar dados reais, siga o [runbook](docs/runbook.md). O exemplo reje
 | Comando | Resultado neste marco |
 | --- | --- |
 | `/status` | Estado local, última leitura e contagem de entregas/operações incertas |
+| `/relatorio` | Relatório imediato com saldos, dia/mês, orçamento, incomuns e ações; não ativa a agenda |
+| `/preferencias` | Consulta e configura diário, alertas, fuso da agenda, dias, hora, detalhe e limites |
 | `/contas` | Saldos até o fim do período, com rótulos de conta fora do orçamento, encerrada e incluída/excluída |
 | `/resumo` ou `/gastos mes` | Despesas brutas, estornos identificados, líquido, receitas, reversões e entradas ambíguas |
 | `/gastos hoje` | Movimento de hoje até a leitura; o dia está em andamento |
@@ -82,6 +86,26 @@ As sugestões seguem regras explícitas locais, exemplos confirmados ativos e hi
 
 `accountId` é opcional; o favorecido é comparado por ID exato. Regras conflitantes têm confiança baixa. Destinos ausentes/ocultos não são oferecidos. Uma nova tentativa real desativa o exemplo anterior do alvo até uma aplicação comprovada; simulações e reconciliações não criam exemplos.
 
+## Relatórios e alertas opcionais
+
+Diário e alertas começam **desligados**, inclusive após instalar a atualização. Configure pelo chat privado autorizado e ative cada rotina explicitamente:
+
+```text
+/preferencias fuso America/Sao_Paulo
+/preferencias dias seg,ter,qua,qui,sex
+/preferencias horario 08:00
+/preferencias detalhe resumido
+/preferencias relatorio ativar
+/preferencias saldo ID_CONTA 10000
+/preferencias alertas ativar
+```
+
+O exemplo de saldo configura R$ 100,00 para um ID real copiado de `/contas`; o catálogo é conferido antes de salvar. Sem essa escolha, saldo baixo fica desligado. `/preferencias relatorio desativar` e `/preferencias alertas desativar` cancelam trabalhos e mensagens ainda pendentes da rotina. Uma mensagem já enviada ou com entrega incerta não pode ser retirada por essa configuração.
+
+O diário usa os dias/horário/fuso escolhidos. Alertas verificam condições a cada 15 minutos, todos os dias, e avisam entrada ou aumento de severidade; a margem de saída evita repetição perto do limite. A data financeira vem do instante agendado no fuso do orçamento. No reinício, cada rotina considera apenas sua última ocorrência perdida, sem enviar as anteriores nem datas anteriores à ativação. Alterar detalhe ou limites não repete um diário já reservado.
+
+Os relatórios tentam reler 12 meses do Actual e identificam snapshot, sincronização e escopo. A falta de leitura completa não atualiza nem resolve alertas. Um relatório diário/manual pode mostrar cache estritamente compatível, marcado como desatualizado. Vencimentos permanecem indicados como calendário não configurado até a fase de recorrências. `dryRun` protege alterações no Actual; não bloqueia relatórios e alertas explicitamente ativados. Veja [agenda e recuperação](docs/scheduling.md) e [regras dos relatórios](docs/reporting.md).
+
 ## Exemplo fictício verificável
 
 O fixture em `test/fixtures/financial.mjs` contém compra de cartão, pagamento entre contas, split, estorno, reversão de receita e contas excluídas. Nos testes, `/resumo 2026-09-01 2026-09-15` produz:
@@ -111,5 +135,7 @@ node --test --test-isolation=none test/finance.test.mjs test/periods.test.mjs te
 - [Interpretação local e privacidade](docs/routing.md)
 - [Contrato Actual e limitações de escrita](docs/actual-contract.md)
 - [Backups cifrados](docs/backups.md)
+- [Agenda, preferências e recuperação dos alertas](docs/scheduling.md)
+- [Regras de relatórios e anomalias](docs/reporting.md)
 
 Os testes usam dados sintéticos e adaptadores simulados, além do teste isolado do SDK fixado. Não comprovam conexão ao orçamento, bot ou servidor de produção.
