@@ -1,0 +1,16 @@
+{
+  "householdId": "home",
+  "timezone": "America/Sao_Paulo",
+  "currency": "BRL",
+  "dataDir": "./data",
+  "secretDir": "./secrets",
+  "telegram": { "userId": 123456789, "chatId": 123456789, "tokenRef": "telegram-token" },
+  "actual": {
+    "serverURL": "http://actual:5006",
+    "budgetId": "REPLACE_WITH_SYNC_ID",
+    "passwordRef": "actual-password",
+    "encryptionPasswordRef": null
+  },
+  "privacy": { "externalProviders": false },
+  "dryRun": true
+}

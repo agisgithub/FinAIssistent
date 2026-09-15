@@ -1,0 +1,12 @@
+node_modules
+.git
+.npm-cache
+work
+data
+secrets
+config.json
+outputs
+*.sqlite*
+*.zip
+*.log
+.env*

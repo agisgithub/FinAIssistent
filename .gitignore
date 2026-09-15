@@ -1,0 +1,12 @@
+node_modules/
+.npm-cache/
+data/
+secrets/
+config.json
+work/
+coverage/
+*.log
+*.sqlite*
+*.zip
+.env*
+!.env.example

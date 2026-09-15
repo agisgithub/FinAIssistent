@@ -1,0 +1,20 @@
+export const ERROR_CODES = new Set([
+  'CONFIG_INVALID', 'SECRET_UNAVAILABLE', 'SECRET_PERMISSIONS', 'UNAUTHORIZED',
+  'STORAGE_FAILED', 'ALREADY_RUNNING', 'ACTUAL_FAILED', 'ACTUAL_SYNC_FAILED',
+  'ACTUAL_TIMEOUT', 'SNAPSHOT_INVALID', 'TELEGRAM_REJECTED', 'DELIVERY_UNCERTAIN',
+  'NETWORK_FAILED', 'INPUT_INVALID', 'INTERNAL_ERROR', 'SHUTTING_DOWN', 'TELEGRAM_WEBHOOK_ACTIVE', 'TELEGRAM_RATE_LIMITED'
+]);
+
+export class AppError extends Error {
+  constructor(code, { retryAfterSeconds } = {}) {
+    super(ERROR_CODES.has(code) ? code : 'INTERNAL_ERROR');
+    this.name = 'AppError';
+    this.code = this.message;
+    if (this.code === 'TELEGRAM_RATE_LIMITED' && Number.isSafeInteger(retryAfterSeconds) && retryAfterSeconds >= 1 && retryAfterSeconds <= 3600) this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+// Never copy third-party error text, URLs, response bodies, SQL or cause chains.
+export function errorCode(error, fallback = 'INTERNAL_ERROR') {
+  return error instanceof AppError && ERROR_CODES.has(error.code) ? error.code : fallback;
+}

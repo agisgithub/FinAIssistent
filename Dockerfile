@@ -1,0 +1,26 @@
+FROM node:24-bookworm-slim AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+
+FROM dependencies AS verify
+COPY src ./src
+COPY migrations ./migrations
+COPY scripts ./scripts
+COPY test ./test
+RUN mkdir -p /app/work && chown -R node:node /app/work
+USER node
+CMD ["npm", "test"]
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production CONFIG_FILE=/app/config.json
+WORKDIR /app
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY package.json ./
+COPY src ./src
+COPY migrations ./migrations
+COPY scripts/health.mjs ./scripts/health.mjs
+RUN mkdir -p /data/actual && chown -R node:node /data
+USER node
+HEALTHCHECK --interval=60s --timeout=5s --start-period=45s --retries=3 CMD ["node", "scripts/health.mjs"]
+CMD ["node", "src/main.mjs"]

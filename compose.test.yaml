@@ -1,0 +1,12 @@
+services:
+  tests:
+    build:
+      context: .
+      target: verify
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /app/work:rw,nosuid,size=256m,uid=1000,gid=1000,mode=0700
+      - /tmp:rw,nosuid,size=256m,uid=1000,gid=1000,mode=0700
