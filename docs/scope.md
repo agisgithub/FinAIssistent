@@ -30,6 +30,6 @@ Gemini é uma fase opcional separada. E-mail, cofre, portais e automação sem c
 
 O orçamento mensal é o envelope integral retornado pelo Actual e pode incluir transações posteriores à data final da consulta. A preferência de contas só altera os cálculos de transações, não esses fatos mensais. Diferença entre saldo antes do consumo e alocado é uma derivação; o campo `carryover` do SDK é booleano.
 
-Callbacks ainda respondem como indisponíveis. A preferência `/escopo` é uma atribuição local idempotente. Mutações financeiras, confirmação e desfazer serão implementados no marco 1C. Filhos de split aparecem nas consultas; a futura escrita por bot os bloqueará por limitação de preservação dos campos no SDK fixado.
+A preferência `/escopo` é uma atribuição local idempotente. No marco 1C, a categorização usa proposta persistida e confirmação explícita por comando ou callback; desfazer exige uma nova proposta. A execução real depende de `dryRun:false` e backups cifrados; o padrão simula a operação. Pais e filhos de split aparecem nas consultas e são bloqueados para escrita por limitação de preservação dos campos no SDK fixado. Detalhes de autorização e recuperação estão em [authorization.md](authorization.md) e [actual-contract.md](actual-contract.md).
 
 Os testes locais não substituem validação da imagem Linux/UID de produção, compatibilidade com o servidor Actual e demonstração controlada com o bot do responsável.

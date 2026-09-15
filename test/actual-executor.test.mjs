@@ -16,6 +16,7 @@ async function fixture(t, overrides = {}) {
     init: undefined, downloadBudget: undefined, sync: undefined, shutdown: undefined,
     getAccounts: [{ id: 'account-a', name: 'Synthetic account' }],
     getCategories: [{ id: 'category', name: 'Synthetic category', group_id: 'group' }],
+    getCategoryGroups: [{ id: 'group', name: 'Synthetic group' }],
     getPayees: [], getBudgetMonths: ['2026-08', '2026-09', '2026-10'],
     getBudgetMonth: { month: '2026-09', totalBudgeted: 10000, totalSpent: -100, totalBalance: 9900, categoryGroups: [] },
     getAccountBalance: 4900,

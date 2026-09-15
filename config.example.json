@@ -12,6 +12,8 @@
     "encryptionPasswordRef": null
   },
   "privacy": { "externalProviders": false },
+  "backup": { "keyRef": null },
+  "categorization": { "rules": [] },
   "ollama": {
     "enabled": false,
     "url": "http://127.0.0.1:11434",

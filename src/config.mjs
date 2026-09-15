@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AppError } from './errors.mjs';
 import { validateOllamaConfig } from './llm/config.mjs';
+import { validateCategorizationConfig } from './categorization/recommend.mjs';
 
 const bad = () => { throw new AppError('CONFIG_INVALID'); };
 function object(value, keys) {
@@ -10,7 +11,7 @@ function object(value, keys) {
 const ref = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value);
 const id = value => Number.isSafeInteger(value) && value > 0;
 export function validateConfig(input, baseDir = process.cwd()) {
-  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama']);
+  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization']);
   object(input.telegram, ['userId', 'chatId', 'tokenRef']);
   object(input.actual, ['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs']);
   const privacy = input.privacy ?? { externalProviders: false };
@@ -31,6 +32,9 @@ export function validateConfig(input, baseDir = process.cwd()) {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300000) bad();
   const dryRun = input.dryRun ?? true;
   if (typeof dryRun !== 'boolean') bad();
+  const backup = input.backup ?? {};
+  object(backup, ['keyRef']);
+  if (backup.keyRef != null && !ref(backup.keyRef)) bad();
   const retentionDays = input.retentionDays ?? 90;
   if (!Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 365) bad();
   for (const value of [input.dataDir ?? './data', input.secretDir ?? './secrets']) {
@@ -45,6 +49,8 @@ export function validateConfig(input, baseDir = process.cwd()) {
     telegram: Object.freeze({ ...input.telegram }),
     actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
     privacy: Object.freeze({ externalProviders: false }),
+    backup: Object.freeze({ keyRef: backup.keyRef ?? null }),
+    categorization: validateCategorizationConfig(input.categorization),
     ollama: validateOllamaConfig(input.ollama)
   });
 }

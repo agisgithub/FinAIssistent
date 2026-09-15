@@ -43,9 +43,9 @@ function normalizeBudgetMonths(months, period) {
   });
 }
 
-export function normalizeSnapshot({ config, period, accounts, categories, payees, transactions, budgetMonths = [], syncedAt, failedAccountIds = [] }) {
+export function normalizeSnapshot({ config, period, accounts, categories, categoryGroups = [], payees, transactions, budgetMonths = [], syncedAt, failedAccountIds = [] }) {
   validatePeriod(period);
-  if (![accounts, categories, payees, transactions, budgetMonths, failedAccountIds].every(Array.isArray) || !Number.isFinite(Date.parse(syncedAt))) invalid();
+  if (![accounts, categories, categoryGroups, payees, transactions, budgetMonths, failedAccountIds].every(Array.isArray) || !Number.isFinite(Date.parse(syncedAt))) invalid();
   const normalizedAccounts = accounts.map(a => ({ id: id(a.id), name: text(a.name, 500), offBudget: flag(a.offbudget), closed: flag(a.closed), balance: a.balance == null ? null : money(a.balance) }));
   const accountIds = new Set(normalizedAccounts.map(a => a.id));
   if (accountIds.size !== accounts.length) invalid();
@@ -92,6 +92,7 @@ export function normalizeSnapshot({ config, period, accounts, categories, payees
     coverage: { complete: failedAccountIds.length === 0, failedAccountIds: [...failedAccountIds] },
     accounts: normalizedAccounts,
     categories: unique(categories.map(c => ({ id: id(c.id), name: text(c.name, 500), groupId: nullableId(c.group_id), isIncome: flag(c.is_income), hidden: flag(c.hidden) }))),
+    categoryGroups: unique(categoryGroups.map(g => ({ id: id(g.id), name: text(g.name, 500), isIncome: flag(g.is_income), hidden: flag(g.hidden) }))),
     payees: unique(payees.map(p => ({ id: id(p.id), name: text(p.name, 500), transferAccountId: nullableId(p.transfer_acct) }))),
     transactions: rows, budgetMonths: normalizeBudgetMonths(budgetMonths, period)
   };

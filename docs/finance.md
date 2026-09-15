@@ -24,6 +24,22 @@ Toda consulta obtém um snapshot completo antes de somar. As respostas mostram I
 
 Consultas repetidas fazem nova leitura para captar alterações retroativas. Na indisponibilidade do Actual, o último snapshot só é reutilizado se identidade, orçamento, moeda, fuso, período e preferência de contas coincidirem e a cobertura estiver completa. A resposta destaca `DADOS DESATUALIZADOS`. Sem correspondência, informa a data da última leitura sem apresentar totais.
 
+## Gastos por categoria
+
+“Quanto gastamos com mercado nos últimos seis meses?” produz uma consulta de **Mercado**, não uma soma de todas as despesas. O parser extrai o nome, e o código resolve esse nome no catálogo real de categorias de despesa, ignorando apenas diferenças de caixa, espaços e acentos. O modelo não escolhe IDs. Não existe associação automática por parecido: nome inexistente ou homônimo retorna opções do catálogo sem total.
+
+Comando explícito: `/gastos com Mercado | ultimos 6 meses`. O separador `|` distingue o nome do período. Nomes com separadores podem ser escritos como uma string JSON entre aspas. Para homônimos em grupos diferentes, a resposta apresenta nome do grupo e um comando copiado como `/gastos com "Mercado :: grupo-real" | 2026-04-01 2026-09-15`; o par nome/grupo precisa existir no catálogo. O identificador de grupo é apenas uma desambiguação explícita, nunca um campo escolhido pelo modelo. Nomes repetidos no mesmo grupo exigem nomes distintos no Actual.
+
+Somente transações da categoria resolvida entram nos cálculos desse filtro, incluindo seus estornos e filhos de splits. O snapshot salvo continua contendo todas as transações lidas; consultar uma categoria não reduz a cobertura de um cache usado depois para o total geral. O rodapé informa a categoria e o ID resolvido. Snapshots antigos sem nomes de grupos exibem o ID e “grupo não informado”, sem selecionar uma opção automaticamente.
+
+## Comparação e perguntas de planejamento
+
+`/comparar` e “Quais gastos aumentaram?” comparam o mês atual até hoje com os mesmos dias disponíveis do mês anterior. Um único snapshot cobre ambas as faixas, mas cada análise de despesas recorta exatamente seus dias. Lançamentos do fim do mês anterior fora da faixa comparável não entram na base. A resposta mostra bruto, estornos, líquido e variação por categoria, além de ambas as datas e durações.
+
+Se o mês anterior for mais curto, a diferença de duração fica explícita e não há extrapolação nem normalização silenciosa por dia. Base anterior zero com despesa atual positiva vira “novo gasto no período comparado”, sem divisão por zero. A consulta compara despesas e não reetiqueta o saldo atual de uma conta como saldo histórico anterior. Esta comparação não determina a causa da mudança.
+
+Perguntas sobre assumir parcela/financiamento ou montar plano de economia pedem renda líquida estável, compromissos, reserva, valor e prazo; parcela também pede entrada, juros/CET e número de parcelas. Esse caminho não consulta o orçamento nem usa IA e não afirma viabilidade. O schema local também oferece a intenção limitada `needs_info` para perguntas equivalentes reconhecidas pelo modelo. Este marco não implementa um simulador de crédito ou plano de economia com dados confirmados.
+
 ## Datas e orçamento
 
 `hoje`, `ontem`, `mes`, `mes passado`, intervalos ISO e até 24 meses são suportados. “Últimos seis meses” começa no primeiro dia do mês de cinco meses atrás e termina hoje. A data de hoje usa o fuso da residência; o dia em andamento fica explícito.

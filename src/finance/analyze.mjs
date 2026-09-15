@@ -8,7 +8,7 @@ export function validateScope(input = DEFAULT_SCOPE) {
   return Object.freeze({ ...input });
 }
 
-export function analyzeSnapshot(snapshot, { period = snapshot.period, scope = DEFAULT_SCOPE, today } = {}) {
+export function analyzeSnapshot(snapshot, { period = snapshot.period, scope = DEFAULT_SCOPE, today, categoryId = null } = {}) {
   scope = validateScope(scope);
   boundedPeriod(period, today);
   if (snapshot.coverage?.complete !== true || snapshot.coverage.failedAccountIds?.length !== 0) throw new AppError('SNAPSHOT_INVALID');
@@ -17,6 +17,7 @@ export function analyzeSnapshot(snapshot, { period = snapshot.period, scope = DE
   const selected = snapshot.accounts.filter(account => (scope.includeOffBudget || !account.offBudget) && (scope.includeClosed || !account.closed));
   const selectedIds = new Set(selected.map(account => account.id));
   const categories = new Map(snapshot.categories.map(category => [category.id, category]));
+  if (categoryId !== null && !categories.has(categoryId)) throw new AppError('INPUT_INVALID');
   const payees = new Map(snapshot.payees.map(payee => [payee.id, payee]));
   const groups = new Map(), uncategorized = [], included = [];
   const totals = { grossExpenses: 0, refunds: 0, netExpenses: 0, income: 0, incomeReversals: 0, netIncome: 0, unclassifiedInflows: 0, netMovement: 0 };
@@ -27,6 +28,7 @@ export function analyzeSnapshot(snapshot, { period = snapshot.period, scope = DE
     if (transaction.isParent) { excluded.parents++; continue; }
     if (transaction.transferId || payees.get(transaction.payeeId)?.transferAccountId) { excluded.transfers++; continue; }
     if (!selectedIds.has(transaction.accountId)) { excluded.accounts++; continue; }
+    if (categoryId !== null && transaction.categoryId !== categoryId) continue;
     included.push(transaction);
     const category = categories.get(transaction.categoryId);
     const income = category?.isIncome === true;
@@ -65,7 +67,8 @@ export function analyzeSnapshot(snapshot, { period = snapshot.period, scope = DE
       period: { ...period }, timezone: snapshot.timezone, currency: snapshot.currency, syncedAt: snapshot.syncedAt,
       rulesVersion: 'finance-1', snapshotRulesVersion: snapshot.rulesVersion, complete: true, scope, accountIds: selected.map(account => account.id),
       excludedAccountIds: snapshot.accounts.filter(account => !selectedIds.has(account.id)).map(account => account.id),
-      currentDayPartial: period.end === today
+      currentDayPartial: period.end === today,
+      ...(categoryId === null ? {} : { category: { id: categoryId, name: categories.get(categoryId).name, groupId: categories.get(categoryId).groupId ?? null } })
     },
     totals, byCategory, budgets, excluded, accounts: snapshot.accounts,
     includedTransactions: included, uncategorized: uncategorized.sort((a, b) => b.date.localeCompare(a.date) || a.id.localeCompare(b.id)),

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppError, ERROR_CODES } from '../errors.mjs';
+import { recoverOperations, pruneOperations } from '../audit/operations.mjs';
+import { withActionMetadata } from '../categorization/response.mjs';
 
 const migrationsPath = fileURLToPath(new URL('../../migrations/', import.meta.url));
 const decode = row => row ? { ...row, payload: row.payload == null ? null : JSON.parse(row.payload) } : null;
@@ -135,10 +137,12 @@ export class StateStore {
   failJob(job, code) {
     code = safeCode(code);
     this.transaction(() => {
-      const state = job.safe_retry ? 'failed' : 'uncertain';
+      const persisted = this.db.prepare('SELECT safe_retry FROM jobs WHERE id=? AND household_id=?').get(job.id, this.identity.householdId);
+      if (!persisted) throw new AppError('STORAGE_FAILED');
+      const state = persisted.safe_retry ? 'failed' : 'uncertain';
       this.db.prepare('UPDATE jobs SET state=?,error_code=?,updated_at=? WHERE id=? AND household_id=?').run(state, code, this.now(), job.id, this.identity.householdId);
       this.db.prepare('UPDATE job_attempts SET finished_at=?,outcome=? WHERE job_id=? AND attempt=?').run(this.now(), state, job.id, job.attempts);
-      this.enqueueOutbox({ text: `Não foi possível concluir. Código: ${code}.`, dedupeKey: `job-error:${job.id}` });
+      this.enqueueOutbox(withActionMetadata({ text: `Não foi possível concluir. Código: ${code}.`, dedupeKey: `job-error:${job.id}` }, { reason: 'command_error', failure: code }));
     });
   }
   enqueueOutbox({ text, dedupeKey, chatId = this.identity.chatId, replyMarkup = undefined }) {
@@ -175,9 +179,16 @@ export class StateStore {
   }
   recover() {
     this.transaction(() => {
+      const completed = this.db.prepare(`SELECT j.id,j.attempts FROM jobs j JOIN operations o ON o.confirmation_job_id=j.id
+        WHERE j.state='running' AND o.state IN ('applied','failed_before','uncertain','simulated','observed_after','observed_before')
+        AND EXISTS(SELECT 1 FROM outbox x WHERE x.dedupe_key='operation-result:'||o.id||':0')`).all();
+      for (const job of completed) {
+        this.db.prepare("UPDATE jobs SET state='done',updated_at=? WHERE id=?").run(this.now(), job.id);
+        this.db.prepare("UPDATE job_attempts SET outcome='done',finished_at=? WHERE job_id=? AND attempt=?").run(this.now(), job.id, job.attempts);
+      }
       this.db.prepare("UPDATE jobs SET state=CASE WHEN safe_retry=1 THEN 'queued' ELSE 'uncertain' END,updated_at=? WHERE state='running'").run(this.now());
       this.db.prepare("UPDATE outbox SET state='uncertain',error_code='DELIVERY_UNCERTAIN',updated_at=? WHERE state='sending'").run(this.now());
-      this.db.prepare("UPDATE operations SET state='uncertain',updated_at=? WHERE state IN ('reserved','executing','verified')").run(this.now());
+      recoverOperations(this);
     });
   }
   setPreference(key, value) { if (!keyValid(key)) throw new AppError('INPUT_INVALID'); this.db.prepare('INSERT INTO preferences VALUES (?,?,?) ON CONFLICT(household_id,key) DO UPDATE SET value=excluded.value').run(this.identity.householdId, key, serialized(value)); }
@@ -192,6 +203,7 @@ export class StateStore {
       queued: this.db.prepare("SELECT COUNT(*) n FROM jobs WHERE state='queued'").get().n,
       uncertainDeliveries: this.db.prepare("SELECT COUNT(*) n FROM outbox WHERE state='uncertain'").get().n,
       uncertainOperations: this.db.prepare("SELECT COUNT(*) n FROM operations WHERE state='uncertain'").get().n,
+      observedOperations: this.db.prepare("SELECT COUNT(*) n FROM operations WHERE state IN ('observed_after','observed_before')").get().n,
       lastSnapshotAt: this.db.prepare('SELECT MAX(created_at) at FROM snapshots').get().at ?? null
     };
   }
@@ -201,6 +213,7 @@ export class StateStore {
       this.db.prepare("UPDATE jobs SET payload=NULL WHERE state IN ('done','failed') AND updated_at<?").run(yesterday);
       this.db.prepare("UPDATE outbox SET payload=NULL WHERE state='sent' AND updated_at<?").run(yesterday);
       this.db.prepare('DELETE FROM snapshots WHERE created_at<?').run(this.now() - retentionDays * 86400000);
+      pruneOperations(this, retentionDays);
     });
   }
   heartbeat() { this.db.prepare("INSERT INTO metadata VALUES ('heartbeat_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(this.now())); }

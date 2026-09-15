@@ -4,9 +4,9 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-Fases 0, 1A e 1B: um responsável, uma residência, um orçamento e consultas financeiras com valores calculados em centavos. A fila de entrada, a saída de mensagens e snapshots ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos e perguntas simples funcionam por regras locais; Ollama opcional interpreta outras perguntas de leitura.
+Fases 0, 1A, 1B e 1C: um responsável, uma residência, um orçamento, consultas financeiras em centavos e categorização de um lançamento por proposta confirmada. A fila, as mensagens, as propostas e o registro de operações ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos e perguntas simples funcionam por regras locais; Ollama opcional interpreta outras perguntas de leitura.
 
-As fases seguintes do MVP acrescentam categorização confirmada, desfazer, relatórios agendados, alertas e recorrências. E-mail, cofre, portais e Gemini são posteriores.
+O MVP ainda depende das fases de relatórios agendados, alertas e recorrências. E-mail, cofre, portais e Gemini são posteriores.
 
 ## Executar
 
@@ -44,12 +44,43 @@ Antes de conectar dados reais, siga o [runbook](docs/runbook.md). O exemplo reje
 | `/sem_categoria` | Lançamentos sem categoria e IDs; transferências e pais de splits excluídos |
 | `/ralos` | Categorias ordenadas por despesa líquida; pistas para revisão humana |
 | `/escopo padrao\|encerradas\|fora_orcamento\|todas` | Preferência persistente de contas incluídas nas consultas |
+| `/comparar` | Compara categorias entre os dois últimos meses completos; base zero é identificada |
+| `/categorias [pagina 2]` | Catálogo visível com grupos e IDs para escolher uma categoria |
+| `/sugerir <transactionId>` | Até três sugestões locais com fonte e escore de evidência |
+| `/categorizar <transactionId> <categoryId>` | Prepara uma proposta; nenhum dado é alterado nesta etapa |
+| `/confirmar <código>` ou botão | Consome a proposta uma vez e executa a simulação ou a alteração autorizada |
+| `/cancelar <código>` ou botão | Cancela a proposta |
+| `/operacoes [operationId]` | Lista operações ou consulta novamente o resultado de uma operação |
+| `/reconciliar <operationId>` | Lê o estado atual sem repetir a alteração |
+| `/desfazer <operationId>` | Prepara uma nova proposta de restauração da categoria anterior |
 
 O período padrão começa no primeiro dia do mês e termina hoje. Também são aceitos `2026-08-01 2026-08-31`, `mes passado` e `ultimos 6 meses` (seis meses de calendário incluindo o atual). Listas têm dez itens por página e fornecem o próximo comando, por exemplo `/sem_categoria 2026-08-01 2026-08-31 pagina 2`. A paginação não limita o conjunto usado nas somas.
 
 Um snapshot incompleto não produz totais. Se o Actual ficar indisponível, somente um snapshot com período, identidade e escopo iguais pode fornecer valores, destacados como **desatualizados**; caso contrário, a resposta mostra a indisponibilidade sem total. Uma consulta nova sempre tenta ler novamente o Actual, refletindo alterações retroativas.
 
-Ollama fica desligado no exemplo. Consulte a [configuração local e privacidade](docs/routing.md) antes de habilitar um modelo. A IA recebe apenas a pergunta e a data de referência; valores, IDs e cálculos vêm do código e do Actual. Nenhum comando deste marco altera o orçamento.
+`/gastos com Mercado | ultimos 6 meses` filtra a categoria pelo nome do catálogo. Se houver categorias homônimas, a resposta pede uma escolha por grupo; não soma destinos ambíguos. Perguntas sobre uma nova parcela ou um plano de economia pedem os dados necessários e não aprovam crédito ou decisões de gasto.
+
+Ollama fica desligado no exemplo. Consulte a [configuração local e privacidade](docs/routing.md) antes de habilitar um modelo. A IA recebe apenas a pergunta e a data de referência; valores, IDs e cálculos vêm do código e do Actual. O modelo não participa da confirmação nem recebe snapshots para categorizar.
+
+## Categorização e recuperação
+
+`dryRun` é `true` por padrão. Nesse modo, a confirmação registra uma **simulação**, sem alterar o Actual nem alimentar exemplos confirmados. Para escrita real, configure `dryRun: false` e `backup.keyRef` com o nome de um arquivo secreto contendo uma chave aleatória de 32 bytes em hexadecimal (64 dígitos). O valor da chave não pertence ao JSON. Consulte [backups cifrados](docs/backups.md) para proteção, retenção e recuperação local.
+
+Uma proposta mostra data, valor, conta, favorecido, grupos, IDs e a categoria anterior/nova. Ela dura 15 minutos, pertence ao responsável/chat/orçamento configurados e autoriza somente o campo categoria daquele lançamento. Pais e filhos de splits, transferências, saldo inicial, contas encerradas e contas fora do orçamento são bloqueados para escrita. Mudanças no lançamento, no destino ou na política invalidam a confirmação.
+
+Antes do patch, a aplicação persiste a aprovação e o registro da operação, bloqueia repetição do job e cria backups cifrados do SQLite e do orçamento Actual. Um resultado `applied` exige releitura e sincronização explícita. Se houver timeout, reinício ou resultado não comprovado, a operação fica `uncertain` e o patch não é repetido.
+
+`/reconciliar` distingue `observed_before` e `observed_after`: são estados observados agora, sem prova de quem executou a alteração. `observed_after` permite preparar uma nova proposta `/desfazer`, inclusive para restaurar categoria nula. Uma aplicação já verificada conserva seu resultado histórico mesmo que uma leitura posterior encontre edição externa. Desfazer exige o fingerprint posterior ainda igual e a operação mais recente do alvo; não restaura outros campos. O SDK não fornece compare-and-swap entre clientes: edições externas concorrentes, inclusive ciclos A→B→A, continuam um limite. Veja [autorização](docs/authorization.md) e [contrato Actual](docs/actual-contract.md).
+
+As sugestões seguem regras explícitas locais, exemplos confirmados ativos e histórico de até 12 meses, nessa ordem. Não há aplicação automática nem criação de regras no Actual. O escore mede evidência, não probabilidade. Confiança alta exige regra sem conflito ou ao menos cinco exemplos únicos em acordo sem conflito; 5/5 pode ser alta, 9/10 fica conservadoramente média. O modelo local não sugere categorias nesta fase. Exemplo de regra configurada, com IDs reais escolhidos pelo operador:
+
+```json
+"categorization": {
+  "rules": [{ "id": "mercado", "payeeId": "ID_FAVORECIDO", "accountId": "ID_CONTA", "categoryId": "ID_CATEGORIA" }]
+}
+```
+
+`accountId` é opcional; o favorecido é comparado por ID exato. Regras conflitantes têm confiança baixa. Destinos ausentes/ocultos não são oferecidos. Uma nova tentativa real desativa o exemplo anterior do alvo até uma aplicação comprovada; simulações e reconciliações não criam exemplos.
 
 ## Exemplo fictício verificável
 
@@ -78,5 +109,7 @@ node --test --test-isolation=none test/finance.test.mjs test/periods.test.mjs te
 - [Operação e recuperação](docs/runbook.md)
 - [Regras financeiras e consultas](docs/finance.md)
 - [Interpretação local e privacidade](docs/routing.md)
+- [Contrato Actual e limitações de escrita](docs/actual-contract.md)
+- [Backups cifrados](docs/backups.md)
 
 Os testes usam dados sintéticos e adaptadores simulados, além do teste isolado do SDK fixado. Não comprovam conexão ao orçamento, bot ou servidor de produção.

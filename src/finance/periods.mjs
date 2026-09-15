@@ -19,6 +19,14 @@ export function calendarMonths(count, today) {
   date.setUTCMonth(date.getUTCMonth() - count + 1);
   return boundedPeriod({ start: date.toISOString().slice(0, 10), end: today }, today);
 }
+export function comparisonPeriods(today) {
+  if (!validDate(today)) throw new AppError('INPUT_INVALID');
+  const current = boundedPeriod({ start: today.slice(0, 7) + '-01', end: today }, today);
+  const previousLast = new Date(current.start + 'T12:00:00Z'); previousLast.setUTCDate(0);
+  const previousEnd = `${previousLast.toISOString().slice(0, 7)}-${String(Math.min(Number(today.slice(8)), previousLast.getUTCDate())).padStart(2, '0')}`;
+  const previous = boundedPeriod({ start: previousEnd.slice(0, 7) + '-01', end: previousEnd }, today);
+  return Object.freeze({ current, previous, period: boundedPeriod({ start: previous.start, end: current.end }, today), currentDays: Number(current.end.slice(8)), previousDays: Number(previous.end.slice(8)) });
+}
 export function resolvePeriod(input, today) {
   const text = normalizeText(input ?? '');
   if (!text || ['mes', 'este mes', 'no mes', 'mes atual'].includes(text)) return calendarMonths(1, today);

@@ -111,6 +111,20 @@ test('unsupported or write requests have a structurally valid refusal variant', 
   assert.ok(calls[2].body.messages[0].content.includes('{"kind":"unsupported"}'));
 });
 
+test('category filters are names only on spending and planning has a bounded needs-info variant', async () => {
+  const filtered = { ...intent(), categoryName: 'Mercado' };
+  assert.deepEqual(validateIntent(filtered, { today }), filtered);
+  for (const invalid of [
+    { ...intent(), categoryId: 'forged' }, { ...filtered, kind: 'summary' }, { ...filtered, groupId: 'forged' },
+    { ...filtered, categoryName: '' }, { ...filtered, categoryName: 'x'.repeat(501) },
+    { kind: 'needs_info', topic: 'installment', amount: 500 }, { kind: 'needs_info', topic: 'arbitrary' }
+  ]) assert.throws(() => validateIntent(invalid, { today }), { code: 'INPUT_INVALID' });
+  for (const expected of [filtered, { kind: 'needs_info', topic: 'installment' }, { kind: 'needs_info', topic: 'savings' }]) {
+    const { client } = fixture({ chat: () => json({ model: 'synthetic:local', done: true, message: { role: 'assistant', content: JSON.stringify(expected) } }) });
+    assert.deepEqual((await client.interpret('consulta financeira específica', { today })).intent, expected);
+  }
+});
+
 test('incomplete, tool, remote, model-mismatched and invalid JSON responses fail closed', async () => {
   const base = { model: 'synthetic:local', done: true, message: { role: 'assistant', content: JSON.stringify(intent()) } };
   for (const value of [

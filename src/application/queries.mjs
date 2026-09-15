@@ -1,6 +1,8 @@
 import { AppError, errorCode } from '../errors.mjs';
 import { analyzeSnapshot, DEFAULT_SCOPE, validateScope } from '../finance/analyze.mjs';
 import { validateIntent } from '../llm/contracts.mjs';
+import { resolveCategoryName } from '../finance/categories.mjs';
+import { compareSnapshot } from '../finance/comparison.mjs';
 
 export const PAGE_SIZE = 10;
 export function pageItems(items, page, size = PAGE_SIZE) {
@@ -23,6 +25,7 @@ function latestCompatibleSnapshot(store, config, intent, scope) {
 export async function executeQuery(input, { config, store, actual, today }) {
   const intent = validateIntent(input, { today });
   if (intent.kind === 'unsupported') throw new AppError('INPUT_INVALID');
+  if (intent.kind === 'needs_info') return { kind: intent.kind, needsInfo: intent.topic };
   const scope = validateScope(store.getPreference('finance_scope', DEFAULT_SCOPE));
   // Always read fresh full coverage, so retroactive changes invalidate all facts.
   let snapshot, dataState = 'fresh';
@@ -38,9 +41,16 @@ export async function executeQuery(input, { config, store, actual, today }) {
     if (dataState === 'fresh') store.saveSnapshot({ ...snapshot, queryScope: scope });
     return { kind: intent.kind, incomplete: true, snapshotId: snapshot.id, period: intent.period };
   }
-  const analysis = analyzeSnapshot(snapshot, { period: intent.period, scope, today });
+  const selection = intent.categoryName ? resolveCategoryName(intent.categoryName, snapshot.categories) : null;
+  if (selection && !selection.category) {
+    return { kind: intent.kind, intent, categoryChoice: selection.reason, requestedCategory: intent.categoryName,
+      listing: pageItems(selection.options, intent.page), categoryGroups: snapshot.categoryGroups ?? [],
+      snapshotId: snapshot.id, budgetId: snapshot.budgetId, period: intent.period, syncedAt: snapshot.syncedAt, dataState };
+  }
+  const analysis = analyzeSnapshot(snapshot, { period: intent.period, scope, today, categoryId: selection?.category.id ?? null });
   if (dataState === 'fresh') store.saveSnapshot({ ...snapshot, queryScope: scope });
   analysis.metadata.dataState = dataState;
-  const collection = intent.kind === 'accounts' ? analysis.accounts : intent.kind === 'uncategorized' ? analysis.uncategorized : intent.kind === 'budget' ? analysis.budgets : analysis.byCategory;
-  return { kind: intent.kind, intent, analysis, listing: pageItems(collection, intent.page) };
+  const comparison = intent.kind === 'comparison' ? compareSnapshot(snapshot, { scope, today }) : null;
+  const collection = comparison ? comparison.rows : intent.kind === 'accounts' ? analysis.accounts : intent.kind === 'uncategorized' ? analysis.uncategorized : intent.kind === 'budget' ? analysis.budgets : analysis.byCategory;
+  return { kind: intent.kind, intent, analysis, ...(comparison ? { comparison } : {}), listing: pageItems(collection, intent.page) };
 }

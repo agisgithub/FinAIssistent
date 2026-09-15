@@ -2,11 +2,15 @@ import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { AppError, errorCode } from '../errors.mjs';
 import { normalizeSnapshot, validatePeriod, validMonth } from './snapshot.mjs';
+import { inspectCurrent, readTransaction, transactionFingerprint, validateChange, validId } from './transaction.mjs';
+import { writeEncryptedBackup } from '../backups/encrypted.mjs';
+import { performance } from 'node:perf_hooks';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // Owns the SDK's global lifecycle. Production creates exactly one in its worker.
 // Tests inject an SDK-shaped fake; no model-facing arbitrary method dispatch exists.
 export class ActualExecutor {
-  constructor({ api, config, resolveSecret }) {
+  constructor({ api, config, resolveSecret, readbackTimeoutMs = 5000, pollIntervalMs = 25 }) {
     this.api = api;
     this.config = config;
     this.resolveSecret = resolveSecret;
@@ -16,6 +20,8 @@ export class ActualExecutor {
     this.closed = false;
     this.broken = false;
     this.closing = null;
+    this.readbackTimeoutMs = readbackTimeoutMs;
+    this.pollIntervalMs = pollIntervalMs;
   }
   runExclusive(fn) {
     if (this.closed) return Promise.reject(new AppError('SHUTTING_DOWN'));
@@ -53,13 +59,15 @@ export class ActualExecutor {
     return this.runExclusive(async api => {
       try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); }
       const syncedAt = new Date().toISOString();
-      let accounts, categories, payees, budgetMonths;
+      let accounts, categories, categoryGroups, payees, budgetMonths;
       try {
         accounts = await api.getAccounts();
-        categories = await api.getCategories({ hidden: true });
+        // SDK hidden:true means ONLY hidden; omitted means the full catalog.
+        categories = await api.getCategories();
+        categoryGroups = await api.getCategoryGroups();
         payees = await api.getPayees();
         const months = await api.getBudgetMonths();
-        if (![accounts, categories, payees, months].every(Array.isArray) || !months.every(validMonth) || new Set(months).size !== months.length) throw new AppError('SNAPSHOT_INVALID');
+        if (![accounts, categories, categoryGroups, payees, months].every(Array.isArray) || !months.every(validMonth) || new Set(months).size !== months.length) throw new AppError('SNAPSHOT_INVALID');
         budgetMonths = [];
         for (const month of months.filter(m => m >= period.start.slice(0, 7) && m <= period.end.slice(0, 7))) {
           const budget = await api.getBudgetMonth(month);
@@ -86,8 +94,74 @@ export class ActualExecutor {
           withBalances.push({ ...account, balance: null });
         }
       }
-      return normalizeSnapshot({ config: this.config, period, accounts: withBalances, categories, payees, transactions, budgetMonths, syncedAt, failedAccountIds });
+      return normalizeSnapshot({ config: this.config, period, accounts: withBalances, categories, categoryGroups, payees, transactions, budgetMonths, syncedAt, failedAccountIds });
     });
+  }
+  inspectTransaction(targetId) {
+    if (!validId(targetId)) return Promise.reject(new AppError('INPUT_INVALID'));
+    return this.runExclusive(async api => {
+      try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); }
+      const result = await inspectCurrent(api, this.config, targetId);
+      return { ...result, syncedAt: new Date().toISOString() };
+    });
+  }
+  async changeCategory(input) {
+    let args;
+    try { args = validateChange(input); }
+    catch { return { status: 'failed_before', code: 'INPUT_INVALID' }; }
+    if (this.config.dryRun !== false) return { status: 'failed_before', code: 'MUTATION_DRY_RUN' };
+    if (args.context.householdId !== this.config.householdId || args.context.budgetId !== this.config.actual.budgetId) return { status: 'failed_before', code: 'MUTATION_CONFLICT' };
+    let attempted = false, before, after, backupRef;
+    try {
+      return await this.runExclusive(async api => {
+        const sync = async () => { try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); } };
+        const check = inspection => {
+          if (inspection.fingerprint !== args.expectedFingerprint) throw new AppError('MUTATION_CONFLICT');
+          if (!inspection.eligibility.eligible) throw new AppError('MUTATION_INELIGIBLE');
+          if (args.categoryId !== null && !inspection.categories.some(c => c.id === args.categoryId && !c.hidden && ['id', 'name', 'groupId', 'isIncome', 'hidden'].every(key => c[key] === args.expectedCategory[key]))) throw new AppError('MUTATION_CATEGORY_INVALID');
+        };
+        await sync();
+        let inspection = await inspectCurrent(api, this.config, args.targetId);
+        check(inspection); before = inspection.transaction;
+        if (before.categoryId === args.categoryId) throw new AppError('MUTATION_CONFLICT');
+        let bytes;
+        try {
+          bytes = await api.exportBudget();
+          if (!(bytes instanceof Uint8Array) || bytes.length < 4 || Buffer.from(bytes.subarray(0, 4)).toString('hex') !== '504b0304') throw new AppError('BACKUP_FAILED');
+          backupRef = await writeEncryptedBackup(bytes, { config: this.config, operationId: args.operationId, kind: 'actual', resolveSecret: this.resolveSecret });
+        } catch { throw new AppError('BACKUP_FAILED'); }
+        finally { bytes?.fill?.(0); }
+        // Recheck after exporting/persisting: a remote client could have changed
+        // the target or destination while the backup was being written.
+        await sync(); inspection = await inspectCurrent(api, this.config, args.targetId); check(inspection);
+        const expected = transactionFingerprint(args.context, { ...before, categoryId: args.categoryId });
+        const waitForReadback = async () => {
+          const deadline = performance.now() + this.readbackTimeoutMs;
+          while (true) {
+            after = await readTransaction(api, args.targetId);
+            const fingerprint = transactionFingerprint(args.context, after);
+            if (fingerprint === expected) return;
+            // Only the identical old state can be eventual SDK completion.
+            if (fingerprint !== args.expectedFingerprint || performance.now() >= deadline) throw new AppError('MUTATION_UNCERTAIN');
+            await delay(Math.min(this.pollIntervalMs, Math.max(1, deadline - performance.now())));
+          }
+        };
+        attempted = true;
+        // Never use the return value as proof, and never repeat this patch.
+        try {
+          await api.updateTransaction(args.targetId, { category: args.categoryId });
+          await waitForReadback(); await sync(); await waitForReadback();
+        } catch (error) {
+          // A partial/unawaited SDK mutation can outlive this callback. Block
+          // queued direct executor calls; the client terminates its worker.
+          this.broken = true;
+          throw error;
+        }
+        return { status: 'applied', code: null, before, after, beforeFingerprint: args.expectedFingerprint, afterFingerprint: expected, backupRef, verifiedAt: new Date().toISOString() };
+      });
+    } catch (error) {
+      return { status: attempted ? 'uncertain' : 'failed_before', code: attempted ? 'MUTATION_UNCERTAIN' : errorCode(error, 'ACTUAL_FAILED'), ...(before ? { before, beforeFingerprint: args.expectedFingerprint } : {}), ...(after ? { after, afterFingerprint: transactionFingerprint(args.context, after) } : {}), ...(backupRef ? { backupRef } : {}) };
+    }
   }
   close() {
     if (!this.closing) {

@@ -7,6 +7,8 @@ import { createCommandHandler } from '../src/telegram/commands.mjs';
 import { renderQuery } from '../src/reports/render.mjs';
 import { AppError } from '../src/errors.mjs';
 import { TelegramClient } from '../src/telegram/client.mjs';
+import { parseQuery } from '../src/application/dispatch.mjs';
+import { comparisonPeriods } from '../src/finance/periods.mjs';
 
 const query = (kind = 'summary', page = 1, period = PERIOD) => ({ kind, period, page });
 const setup = t => {
@@ -120,4 +122,115 @@ test('external payee text stays quoted data and Telegram link previews cannot be
   const telegram = new TelegramClient({ config: dependencies.config, resolveSecret: async () => '123:SYNTHETIC', fetchImpl: async (_, request) => { body = JSON.parse(request.body); return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } })); } });
   await telegram.sendMessage(123, { text, link_preview_options: { is_disabled: false, url: 'https://example.invalid/privado' } });
   assert.deepEqual(body.link_preview_options, { is_disabled: true });
+});
+
+test('category request resolves Mercado by real name and includes only its spending/refunds across six months', async t => {
+  const dependencies = setup(t);
+  dependencies.actual.snapshot = async period => {
+    const snapshot = financialSnapshot(period); snapshot.categories.find(category => category.id === 'food').name = 'Mercado'; return snapshot;
+  };
+  const intent = parseQuery('Quanto gastamos com mercado nos últimos seis meses?', { today: TODAY });
+  assert.deepEqual(intent, { kind: 'spending', period: { start: '2026-04-01', end: TODAY }, page: 1, categoryName: 'mercado' });
+  const result = await executeQuery(intent, dependencies);
+  assert.equal(result.analysis.totals.grossExpenses, 29000); assert.equal(result.analysis.totals.refunds, 2000); assert.equal(result.analysis.totals.netExpenses, 27000);
+  assert.equal(result.analysis.metadata.category.id, 'food');
+  assert.match(renderQuery(result), /somente essa categoria/); assert.match(renderQuery(result), /2026-04-01 a 2026-09-15/);
+  assert.equal(dependencies.store.latestSnapshot().transactions.length, financialSnapshot(intent.period).transactions.length, 'cache keeps the entire raw snapshot');
+  dependencies.actual.snapshot = async () => { throw new AppError('ACTUAL_FAILED'); };
+  const allFromCache = await executeQuery({ ...intent, categoryName: undefined }, dependencies).catch(error => error);
+  assert.equal(allFromCache.code, 'INPUT_INVALID', 'present undefined category field is not a valid intent');
+  const { categoryName, ...allIntent } = intent;
+  assert.equal((await executeQuery(allIntent, dependencies)).analysis.totals.netExpenses, 32000);
+});
+
+test('homonymous or unknown category names request a choice and accept only a real qualified catalog pair', async t => {
+  const dependencies = setup(t);
+  dependencies.actual.snapshot = async period => {
+    const snapshot = financialSnapshot(period);
+    snapshot.categories.find(category => category.id === 'food').name = 'Mercado'; snapshot.categories[0].groupId = 'family-A';
+    snapshot.categories.push({ id: 'food-other', name: 'Mercado', groupId: 'family-B', isIncome: false, hidden: false });
+    snapshot.categoryGroups = [{ id: 'family-A', name: 'Casa' }, { id: 'family-B', name: 'Trabalho' }];
+    return snapshot;
+  };
+  const intent = parseQuery('/gastos com Mercado | mes', { today: TODAY });
+  const ambiguous = await executeQuery(intent, dependencies), text = renderQuery(ambiguous);
+  assert.equal(ambiguous.categoryChoice, 'ambiguous'); assert.doesNotMatch(text, /R\$/); assert.match(text, /Casa/); assert.match(text, /Trabalho/);
+  const command = text.split('\n').find(line => line.startsWith('/gastos') && line.includes('family-A'));
+  const resolved = await executeQuery(parseQuery(command, { today: TODAY }), dependencies);
+  assert.equal(resolved.analysis.metadata.category.id, 'food'); assert.equal(resolved.analysis.totals.netExpenses, 27000);
+  const invented = await executeQuery({ ...intent, categoryName: 'Mercado :: made-up-group' }, dependencies);
+  assert.equal(invented.categoryChoice, 'not_found'); assert.doesNotMatch(renderQuery(invented), /R\$/);
+  const unknown = await executeQuery({ ...intent, categoryName: 'made-up-category-id' }, dependencies);
+  assert.equal(unknown.categoryChoice, 'not_found');
+});
+
+test('generated group choice colliding with a literal category name remains ambiguous without wrong totals', async t => {
+  const dependencies = setup(t);
+  dependencies.actual.snapshot = async period => {
+    const snapshot = financialSnapshot(period);
+    Object.assign(snapshot.categories.find(category => category.id === 'food'), { name: 'Mercado', groupId: 'A' });
+    snapshot.categories.push({ id: 'food-other', name: 'Mercado', groupId: 'B', isIncome: false, hidden: false });
+    Object.assign(snapshot.categories.find(category => category.id === 'transport'), { name: 'Mercado :: A', groupId: 'C' });
+    snapshot.categoryGroups = [{ id: 'A', name: 'Casa' }, { id: 'B', name: 'Trabalho' }, { id: 'C', name: 'Nome literal' }];
+    return snapshot;
+  };
+  const initial = await executeQuery(parseQuery('/gastos com Mercado | mes', { today: TODAY }), dependencies);
+  const command = renderQuery(initial).split('\n').find(line => line.startsWith('/gastos') && line.includes('Mercado :: A'));
+  assert.ok(command, 'follow the actual generated choice for Mercado/group A');
+  const collision = await executeQuery(parseQuery(command, { today: TODAY }), dependencies);
+  assert.equal(collision.categoryChoice, 'ambiguous');
+  assert.equal(collision.analysis, undefined);
+  assert.deepEqual(new Set(collision.listing.items.map(category => category.id)), new Set(['food', 'transport']));
+  const response = renderQuery(collision);
+  assert.doesNotMatch(response, /R\$/); assert.match(response, /colidir com um nome/);
+  // The literal name remains queryable when its own group resolves uniquely.
+  const literalCommand = response.split('\n').find(line => line.startsWith('/gastos') && line.includes('Mercado :: A :: C'));
+  const literal = await executeQuery(parseQuery(literalCommand, { today: TODAY }), dependencies);
+  assert.equal(literal.analysis.metadata.category.id, 'transport');
+  assert.equal(literal.analysis.totals.netExpenses, 2000);
+});
+
+test('planning/affordability questions ask for specific missing information without model or Actual calls', async t => {
+  const dependencies = setup(t);
+  const handler = createCommandHandler({ ...dependencies, now: () => new Date('2026-09-15T12:00:00Z'), intentClient: { interpret: async () => assert.fail('no model needed') } });
+  const request = text => ({ type: 'message', text, identity: dependencies.identity });
+  const installment = await handler(request('Consigo assumir mais uma parcela?'));
+  assert.match(installment.text, /renda líquida mensal/); assert.match(installment.text, /compromissos/); assert.match(installment.text, /reserva/); assert.match(installment.text, /valor da compra/); assert.match(installment.text, /prazo/);
+  assert.match(installment.text, /não foi calculada viabilidade/);
+  const savings = await handler(request('Quero economizar mais, monte um plano de economia'));
+  assert.match(savings.text, /quanto deseja economizar/); assert.match(savings.text, /qual prazo/);
+  assert.equal(dependencies.calls.length, 0);
+});
+
+test('which expenses increased compares aligned monthly ranges and labels a zero baseline as new expense', async t => {
+  const dependencies = setup(t);
+  dependencies.actual.snapshot = async period => {
+    const snapshot = financialSnapshot(period), base = snapshot.transactions[0];
+    snapshot.transactions = [
+      { ...base, id: 'old-food', date: '2026-08-10', amount: -10000 },
+      { ...base, id: 'old-late', date: '2026-08-25', amount: -99999 },
+      { ...base, id: 'new-food', date: '2026-09-10', amount: -15000 },
+      { ...base, id: 'new-transport', date: '2026-09-10', amount: -2000, categoryId: 'transport' }
+    ];
+    return snapshot;
+  };
+  const intent = parseQuery('Quais gastos aumentaram?', { today: TODAY });
+  assert.equal(intent.kind, 'comparison'); assert.deepEqual(intent.period, { start: '2026-08-01', end: TODAY });
+  const result = await executeQuery(intent, dependencies), text = renderQuery(result);
+  assert.equal(result.comparison.previous.netExpenses, 10000); assert.equal(result.comparison.current.netExpenses, 17000);
+  assert.equal(result.comparison.rows.find(row => row.id === 'food').change, 5000);
+  assert.match(text, /2026-08-01 a 2026-08-15/); assert.match(text, /2026-09-01 a 2026-09-15/);
+  assert.match(text, /\+50,0%/); assert.match(text, /novo gasto no período comparado/); assert.doesNotMatch(text, /NaN|Infinity|9\.900,00/);
+  assert.equal(result.comparison.accounts, undefined, 'comparison must not expose misleading earlier account balances');
+});
+
+test('short prior month comparisons disclose different day counts and do not invent a future date', async t => {
+  const dependencies = setup(t), today = '2026-03-31';
+  dependencies.today = today;
+  const ranges = comparisonPeriods(today);
+  assert.deepEqual(ranges.previous, { start: '2026-02-01', end: '2026-02-28' }); assert.equal(ranges.currentDays, 31); assert.equal(ranges.previousDays, 28);
+  const text = renderQuery(await executeQuery(parseQuery('/comparar', { today }), dependencies));
+  assert.match(text, /31 dias/); assert.match(text, /28 dias/); assert.match(text, /durações diferem/);
+  assert.deepEqual(comparisonPeriods('2024-03-31').previous, { start: '2024-02-01', end: '2024-02-29' });
+  assert.throws(() => parseQuery('/comparar 2026-03-01 2026-03-31', { today }), { code: 'INPUT_INVALID' });
 });
