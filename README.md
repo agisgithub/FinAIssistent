@@ -12,7 +12,13 @@ O carregamento do SDK inclui uma [proteção verificada para a versão fixada](d
 
 ## Instalar no Docker
 
-Siga o [guia passo a passo de Docker](docs/docker-install.md): ele cobre atualização sem perder os volumes, `config.docker.example.json`, token/IDs Telegram, senha/Sync ID Actual, permissões, pré-teste e conferência pelo bot. Actual e Ollama são instalações separadas; não é necessária chave Gemini/OpenAI para este MVP.
+No terminal Bash do servidor onde o projeto já está instalado, execute:
+
+```bash
+cd ~/FinAIssistent && git pull --ff-only origin main && bash scripts/setup-docker.sh
+```
+
+O [assistente de configuração](docs/docker-install.md#configuração-guiada) pergunta os dados necessários. Docker Engine e Compose precisam estar instalados; Actual e Ollama continuam nos serviços que você já utiliza. Não é necessária chave Gemini/OpenAI para este MVP. O [guia](docs/docker-install.md) também contém configuração manual, diagnóstico e testes pelo Telegram.
 
 Se o build terminou, mas apareceu `startup_failed` com `CONFIG_INVALID`, comece pela [configuração e diagnóstico](docs/docker-install.md#o-que-significa-o-erro-apresentado). Um build bem-sucedido não comprova que `config.json` e os segredos estejam preenchidos.
 

@@ -188,5 +188,5 @@ test('Docker example matches shipped mount paths and scripts; Compose fails on a
   assert.equal((compose.match(/create_host_path: false/g) ?? []).length, 2);
   assert.match(compose, /target: \/app\/config.json/); assert.match(compose, /target: \/run\/secrets/);
   const dockerfile = await readFile('Dockerfile', 'utf8');
-  assert.match(dockerfile, /COPY scripts\/health.mjs scripts\/preflight.mjs scripts\/telegram-info.mjs \.\/scripts\//);
+  assert.match(dockerfile, /COPY scripts\/health.mjs scripts\/preflight.mjs scripts\/telegram-info.mjs scripts\/setup-docker.mjs \.\/scripts\//);
 });

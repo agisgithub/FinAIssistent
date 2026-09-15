@@ -1,4 +1,5 @@
 node_modules/
+.setup-private/
 .npm-cache/
 data/
 secrets/

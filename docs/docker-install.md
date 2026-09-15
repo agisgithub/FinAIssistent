@@ -2,6 +2,48 @@
 
 Este guia usa Bash no servidor Linux, com o projeto em `~/FinAIssistent` e Docker Engine convencional. Actual e Ollama já podem estar instalados no mesmo servidor; o Compose deste projeto sobe somente o bot. Não é necessário instalar Node.js no host. Em Docker rootless ou com remapeamento de usuários, o UID do host pode ser diferente: ajuste o dono conforme o [mapeamento de UID/GID do Docker](https://docs.docker.com/engine/security/rootless/uid-gid-mapping/) e use o pré-teste dentro do container como prova de acesso.
 
+## Configuração guiada
+
+Para preencher as informações respondendo a perguntas, abra um terminal Bash interativo no servidor e execute:
+
+```bash
+cd ~/FinAIssistent && git pull --ff-only origin main && bash scripts/setup-docker.sh
+```
+
+O `&&` interrompe a sequência se o diretório ou a atualização falhar. Se o Git informar conflito ou alterações locais, resolva isso antes de repetir; não use reset ou remoção de volumes para prosseguir. O host precisa de Docker Engine, Compose v2 e Git; o assistente usa Node.js dentro da imagem Docker.
+
+Tenha estas informações em mãos:
+
+| Pergunta | Onde obter a resposta |
+| --- | --- |
+| Endereço do Actual | Endereço base/porta do servidor que você já utiliza. No mesmo host, o exemplo oferece `http://host.docker.internal:5006`; confirme a porta e o acesso explicados no [passo 3](#3-ligar-o-bot-ao-actual-que-já-existe) |
+| Sync ID do orçamento | No Actual: **Configurações → Mostrar configurações avançadas → Sync ID** |
+| Senha do Actual | Senha de acesso ao servidor; não é uma chave de API |
+| Criptografia do orçamento | Informe a senha de criptografia somente se o orçamento usar essa proteção |
+| Token Telegram | Fornecido pelo [@BotFather](https://t.me/BotFather) ao criar seu bot com `/newbot` |
+| Seu ID Telegram | Abra o chat privado do seu bot e envie `/start`; o assistente consulta os IDs disponíveis para você conferir |
+| Ollama | Opcional. Para a primeira prova, mantenha desligado; os comandos financeiros já funcionam |
+
+Token e senhas são digitados sem aparecer na tela. Quando houver uma configuração anterior, use Enter para manter o valor que o próprio assistente oferecer. Confira os dados e o resumo antes de autorizar a gravação. Gemini e OpenAI não precisam de chave neste MVP.
+
+O assistente para **somente o bot** antes de configurar. A gravação depende de responder `s` em **Salvar esta configuração e os segredos?**; o padrão é não. Ele ajusta os arquivos para o UID 1000 da aplicação usando um container temporário de provisionamento e conserva os arquivos substituídos em `.setup-private/backups`. Essa cópia inclui configuração/segredos anteriores, não é um backup do orçamento ou do SQLite.
+
+Ao salvar, o script executa o pré-teste e pergunta **Iniciar ou recriar o bot agora?**. Responda `s` para subir. Recusar a gravação ou interromper as perguntas antes dela preserva os arquivos anteriores e deixa o bot parado. Se o pré-teste falhar depois de salvar, a configuração nova já foi gravada e o bot continua parado até a correção.
+
+Na primeira instalação, deixe a escrita real de categorias e o Ollama desligados para conferir o fluxo básico. Se depois habilitar escrita real, o assistente gera a chave de backup somente quando não existe uma chave anterior a preservar. Confirme no resumo o modo selecionado.
+
+Após iniciar, confira `docker compose ps` e envie no chat privado:
+
+```text
+/status
+/contas
+/resumo
+```
+
+`/status` comprova que o bot responde. `/contas` e `/resumo` devem apresentar uma leitura nova do Actual; compare os valores e o período com o orçamento. Uma resposta marcada como desatualizada não comprova a conexão atual. Os [testes completos](#6-testar-configuração-e-código-antes-de-subir) e a [configuração manual](#1-parar-as-tentativas-e-atualizar) abaixo servem para conferência e diagnóstico.
+
+Se o assistente recusar `config.json` por ser pasta/link ou por conter JSON inválido, siga o [passo 2](#2-garantir-que-a-configuração-seja-um-arquivo); ele preserva esse caminho para você revisar. Caminhos personalizados de dados ou segredos também são preservados e exigem configuração manual: o assistente não redireciona esse armazenamento. Uma troca de bot, responsável ou orçamento não redefine o vínculo já guardado nos volumes. Não remova os volumes para contornar essa proteção.
+
 ## O que significa o erro apresentado
 
 O build terminou, mas o processo encerrou com `startup_failed` e `CONFIG_INVALID`. Isso indica falha na configuração ou no vínculo com um estado existente. O log antigo não identificava qual campo falhou; sozinho, ele não comprova que seja senha errada.
