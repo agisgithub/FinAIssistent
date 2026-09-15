@@ -10,7 +10,13 @@ Unidades, recorrências e registros manuais de pagamento exigem confirmação no
 
 O carregamento do SDK inclui uma [proteção verificada para a versão fixada](docs/actual-contract.md#proteção-contra-execução-automática-de-agendas): consultas não acionam o serviço automático de agendas do Actual. Uma versão ou arquivo diferente bloqueia o adaptador até nova revisão; não atualize o SDK isoladamente.
 
-## Executar
+## Instalar no Docker
+
+Siga o [guia passo a passo de Docker](docs/docker-install.md): ele cobre atualização sem perder os volumes, `config.docker.example.json`, token/IDs Telegram, senha/Sync ID Actual, permissões, pré-teste e conferência pelo bot. Actual e Ollama são instalações separadas; não é necessária chave Gemini/OpenAI para este MVP.
+
+Se o build terminou, mas apareceu `startup_failed` com `CONFIG_INVALID`, comece pela [configuração e diagnóstico](docs/docker-install.md#o-que-significa-o-erro-apresentado). Um build bem-sucedido não comprova que `config.json` e os segredos estejam preenchidos.
+
+## Executar com Node.js
 
 Requer Node.js 24. Instale as versões do lockfile:
 
@@ -19,20 +25,14 @@ npm ci
 npm test
 ```
 
-Copie `config.example.json` para `config.json`. Substitua os IDs do responsável/chat e o Sync ID do orçamento Actual. Crie os arquivos de segredo `telegram-token` e `actual-password` na pasta `secrets`, acessíveis somente ao usuário que executa o processo. Se o orçamento usar criptografia, configure `encryptionPasswordRef` com outro arquivo. Não coloque o conteúdo desses arquivos no JSON.
+Copie `config.example.json` para `config.json`. Substitua os IDs do responsável/chat e o Sync ID do orçamento Actual. Crie os arquivos de segredo `telegram-token` e `actual-password` na pasta `secrets`, acessíveis somente ao usuário que executa o processo. Crie também `data/actual`, gravável por esse usuário. Se o orçamento usar criptografia, configure `encryptionPasswordRef` com outro arquivo. Não coloque o conteúdo desses arquivos no JSON.
 
 ```sh
+npm run preflight
 npm start
 ```
 
-Para Docker, ajuste `dataDir` para `/data`, `secretDir` para `/run/secrets` e `actual.serverURL` para um endereço alcançável pelo container. A imagem usa UID/GID 1000; os segredos montados precisam permitir leitura a esse usuário.
-
-```sh
-docker compose up --build -d
-docker compose -f compose.test.yaml run --build --rm tests
-```
-
-Antes de conectar dados reais, siga o [runbook](docs/runbook.md). O exemplo rejeita o Sync ID de substituição; é necessário configurar o orçamento intencionalmente.
+Inicie somente se o pré-teste passar. Ele verifica configuração, segredos e acesso local aos diretórios, sem conectar aos serviços. O exemplo rejeita o Sync ID de substituição; é necessário configurar o orçamento intencionalmente. Para recuperação e uso real, siga o [runbook](docs/runbook.md).
 
 ## Comandos
 
@@ -155,6 +155,7 @@ node --test --test-isolation=none test/finance.test.mjs test/periods.test.mjs te
 
 ## Documentação
 
+- [Instalação Docker, credenciais e testes reais](docs/docker-install.md)
 - [Escopo e critérios de aceite](docs/scope.md)
 - [Arquitetura e contratos](docs/architecture.md)
 - [Autorização e privacidade](docs/authorization.md)

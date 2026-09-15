@@ -22,3 +22,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker compose -f compose.test.yaml run --build --rm tests
       - run: docker build --target runtime -t finaissistent:ci .
+      - run: node scripts/smoke-runtime.mjs finaissistent:ci

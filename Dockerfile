@@ -8,6 +8,7 @@ COPY src ./src
 COPY migrations ./migrations
 COPY scripts ./scripts
 COPY test ./test
+COPY config.docker.example.json compose.yaml Dockerfile ./
 RUN mkdir -p /app/work && chown -R node:node /app/work
 USER node
 CMD ["npm", "test"]
@@ -19,7 +20,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json ./
 COPY src ./src
 COPY migrations ./migrations
-COPY scripts/health.mjs ./scripts/health.mjs
+COPY scripts/health.mjs scripts/preflight.mjs scripts/telegram-info.mjs ./scripts/
 RUN mkdir -p /data/actual && chown -R node:node /data
 USER node
 HEALTHCHECK --interval=60s --timeout=5s --start-period=45s --retries=3 CMD ["node", "scripts/health.mjs"]

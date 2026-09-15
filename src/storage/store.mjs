@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppError, ERROR_CODES } from '../errors.mjs';
+import { badConfig } from '../config-diagnostics.mjs';
 import { recoverOperations, pruneOperations } from '../audit/operations.mjs';
 import { withActionMetadata } from '../categorization/response.mjs';
 
@@ -62,7 +63,7 @@ export class StateStore {
       const binding = this.db.prepare('SELECT budget_id FROM budget_bindings WHERE household_id=?').get(householdId);
       const other = this.db.prepare('SELECT id FROM households WHERE id<>? LIMIT 1').get(householdId);
       const owner = this.db.prepare('SELECT user_id,chat_id FROM users WHERE household_id=?').get(householdId);
-      if (other || (binding && binding.budget_id !== budgetId) || (owner && (owner.user_id !== userId || owner.chat_id !== chatId))) throw new AppError('CONFIG_INVALID');
+      if (other || (binding && binding.budget_id !== budgetId) || (owner && (owner.user_id !== userId || owner.chat_id !== chatId))) badConfig('state', 'state_identity_mismatch');
       this.db.prepare('INSERT OR IGNORE INTO households VALUES (?,?,?)').run(householdId, timezone, currency);
       this.db.prepare('INSERT OR IGNORE INTO users VALUES (?,?,?)').run(householdId, userId, chatId);
       this.db.prepare('INSERT OR IGNORE INTO budget_bindings VALUES (?,?)').run(householdId, budgetId);
@@ -81,10 +82,10 @@ export class StateStore {
   }
   cursor() { return this.telegramEpochExpired() ? 0 : Number(this.db.prepare("SELECT value FROM metadata WHERE key='telegram_offset'").get()?.value ?? 0); }
   bindTelegramBot(botId) {
-    if (!Number.isSafeInteger(botId) || botId <= 0) throw new AppError('CONFIG_INVALID');
+    if (!Number.isSafeInteger(botId) || botId <= 0) badConfig('telegram', 'invalid_bot_identity');
     this.transaction(() => {
       const old = this.db.prepare("SELECT value FROM metadata WHERE key='telegram_bot_id'").get()?.value;
-      if (old && old !== String(botId)) throw new AppError('CONFIG_INVALID');
+      if (old && old !== String(botId)) badConfig('state', 'bot_identity_mismatch');
       this.db.prepare("INSERT OR IGNORE INTO metadata VALUES ('telegram_bot_id',?)").run(String(botId));
     });
   }

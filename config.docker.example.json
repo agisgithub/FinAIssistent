@@ -1,0 +1,28 @@
+{
+  "householdId": "home",
+  "timezone": "America/Sao_Paulo",
+  "currency": "BRL",
+  "dataDir": "/data",
+  "secretDir": "/run/secrets",
+  "telegram": { "userId": 123456789, "chatId": 123456789, "tokenRef": "telegram-token" },
+  "actual": {
+    "serverURL": "http://host.docker.internal:5006",
+    "budgetId": "REPLACE_WITH_SYNC_ID",
+    "passwordRef": "actual-password",
+    "encryptionPasswordRef": null
+  },
+  "privacy": { "externalProviders": false },
+  "backup": { "keyRef": null },
+  "categorization": { "rules": [] },
+  "ollama": {
+    "enabled": false,
+    "url": "http://host.docker.internal:11434",
+    "model": null,
+    "localOnlyConfirmed": false,
+    "allowPrivateAddress": false,
+    "timeoutMs": 30000,
+    "contextTokens": 8192,
+    "outputTokens": 256
+  },
+  "dryRun": true
+}

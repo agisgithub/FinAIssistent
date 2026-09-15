@@ -1,16 +1,18 @@
 import { createHash } from 'node:crypto';
-import { AppError } from '../errors.mjs';
+import { badConfig } from '../config-diagnostics.mjs';
 
 export const validTargetId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 export function validateCategorizationConfig(value = {}) {
-  const bad = () => { throw new AppError('CONFIG_INVALID'); };
-  if (!value || Array.isArray(value) || typeof value !== 'object' || Object.keys(value).some(k => k !== 'rules')) bad();
+  const bad = (field, reason) => badConfig('categorization' + (field ? '.' + field : ''), reason);
+  if (!value || Array.isArray(value) || typeof value !== 'object') bad('', 'expected_object');
+  if (Object.keys(value).some(k => k !== 'rules')) bad('', 'unknown_field');
   const rules = value.rules ?? [];
-  if (!Array.isArray(rules) || rules.length > 100 || new Set(rules.map(r => r?.id)).size !== rules.length) bad();
+  if (!Array.isArray(rules) || rules.length > 100 || new Set(rules.map(r => r?.id)).size !== rules.length) bad('rules', 'invalid_rules');
   return Object.freeze({ rules: Object.freeze(rules.map(rule => {
-    if (!rule || Array.isArray(rule) || Object.keys(rule).some(k => !['id','payeeId','accountId','categoryId'].includes(k)) ||
-      !validTargetId(rule.id) || !validTargetId(rule.payeeId) || !validTargetId(rule.categoryId) ||
-      (rule.accountId != null && !validTargetId(rule.accountId))) bad();
+    if (!rule || Array.isArray(rule) || typeof rule !== 'object') bad('rules', 'expected_object');
+    if (Object.keys(rule).some(k => !['id','payeeId','accountId','categoryId'].includes(k))) bad('rules', 'unknown_field');
+    for (const key of ['id', 'payeeId', 'categoryId']) if (!validTargetId(rule[key])) bad('rules.' + key, 'invalid_identifier');
+    if (rule.accountId != null && !validTargetId(rule.accountId)) bad('rules.accountId', 'invalid_identifier');
     return Object.freeze({ id: rule.id, payeeId: rule.payeeId, accountId: rule.accountId ?? null, categoryId: rule.categoryId });
   })) });
 }

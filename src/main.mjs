@@ -7,6 +7,7 @@ import { acquireLock } from './storage/lock.mjs';
 import { secretResolver } from './secrets/resolver.mjs';
 import { createLogger } from './observability/logger.mjs';
 import { errorCode } from './errors.mjs';
+import { configDiagnostic } from './config-diagnostics.mjs';
 import { TelegramClient } from './telegram/client.mjs';
 import { ActualClient } from './actual/client.mjs';
 import { createCommandHandler } from './telegram/commands.mjs';
@@ -54,5 +55,9 @@ export async function main({ config: injectedConfig, actual: injectedActual, tel
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main().catch(error => { createLogger()('startup_failed', { code: errorCode(error) }); process.exitCode = 1; });
+  main().catch(error => {
+    const detail = configDiagnostic(error);
+    createLogger()('startup_failed', { code: errorCode(error), configField: detail?.field, configReason: detail?.reason });
+    process.exitCode = 1;
+  });
 }

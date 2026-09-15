@@ -1,16 +1,34 @@
 # Operação e recuperação
 
+Para preparar o servidor pela primeira vez ou corrigir `CONFIG_INVALID` após um build Docker, siga o [guia de instalação, credenciais e testes](docker-install.md). Ele preserva configuração/volumes existentes e diferencia o pré-teste local da conexão real ao Telegram e Actual.
+
 ## Preparar o ambiente
 
 1. Use Node.js 24 ou a imagem Docker deste repositório. Instale com `npm ci`; mantenha o lockfile. O SDK Actual está fixado em 26.9.0; valide a compatibilidade do servidor em um orçamento sintético antes de conectar o orçamento pessoal.
 2. Use bot, diretórios de dados, cache Actual e banco SQLite exclusivos desta aplicação. Não compartilhe o volume com outra cópia do bot nem com outro cliente SDK. Use filesystem local com locks de arquivo, não NFS.
-3. Copie e ajuste `config.example.json`. O `budgetId` é o **Sync ID**, não o nome exibido do orçamento. IDs do Telegram são números inteiros; o MVP requer conversa privada com `userId === chatId`.
+3. Copie e ajuste `config.example.json` para Node.js ou `config.docker.example.json` para Docker, somente se ainda não houver `config.json`. O `budgetId` é o **Sync ID**, não o nome exibido do orçamento. IDs do Telegram são números inteiros; o MVP requer conversa privada com `userId === chatId`.
 4. Crie `secrets/telegram-token`, `secrets/actual-password` e, se necessário, o segredo de criptografia do orçamento. Coloque uma linha por arquivo. O último newline é removido, mas espaços no valor são preservados.
 5. Em Linux, dono e permissões precisam corresponder ao processo: pasta privada, arquivo `0600`/`0400`. Em Docker a imagem usa UID/GID 1000, arquivos montados somente para leitura. Em Windows, use a guia Segurança das propriedades para remover acesso herdado amplo e conceder leitura à conta que executa o bot; confira as ACLs antes de uso real. Não cole os valores em comandos compartilhados, logs ou mensagens.
 6. Para Docker, configure `/data` e `/run/secrets` no JSON. `actual.serverURL` deve ser alcançável a partir do container; `localhost` dentro dele se refere ao próprio container. O compose não publica portas. O servidor Actual é uma implantação separada.
-7. Execute os testes. Inicie com `npm start` ou `docker compose up --build -d`. Teste `/status`, `/contas`, `/gastos` pelo usuário autorizado e confira os valores no Actual.
+7. Execute `npm run preflight` ou `docker compose run --rm --no-deps bot node scripts/preflight.mjs` depois de construir a imagem. Esse diagnóstico não usa rede; não comprova senha correta nem disponibilidade remota. Corrija as falhas, execute os testes e inicie com `npm start` ou `docker compose up -d bot`. Teste `/status`, `/contas`, `/gastos` pelo usuário autorizado e confira os valores no Actual.
 
 A aplicação consulta `getWebhookInfo` e recusa inicialização se houver webhook. Ajuste conscientemente a configuração do bot que será usado para polling; a aplicação não apaga um webhook existente. O bot precisa ter uma conversa privada iniciada pelo responsável.
+
+## Diagnosticar a inicialização
+
+```sh
+docker compose stop bot
+docker compose config --quiet
+docker compose run --rm --no-deps bot node scripts/preflight.mjs
+```
+
+O pré-teste imprime resultados estruturados sem valores secretos; termina com código `0` quando passa, `1` quando há falha e `2` para uso inválido da CLI. A escrita de prova usa um arquivo temporário próprio, sem modificar o SQLite. Execute-o como o usuário normal da imagem para testar as permissões reais. `docker compose config --quiet` valida o Compose, não o JSON da aplicação.
+
+Confira `config.json` como arquivo real, JSON válido, caminhos Docker `/data` e `/run/secrets`, IDs preenchidos e arquivos privados acessíveis ao UID 1000. O Compose rejeita origens ausentes para configuração e segredos; não as cria como pastas. O [guia](docker-install.md#2-garantir-que-a-configuração-seja-um-arquivo) trata uma pasta `config.json` criada por uma versão anterior sem apagar dados.
+
+Com o bot parado, `docker compose run --rm --no-deps bot node scripts/telegram-info.mjs` verifica o token montado e mostra apenas IDs de conversas privadas, após você enviar `/start`. A ferramenta usa rede Telegram, mas não envia mensagens, remove webhook ou avança o cursor. Não substitui a seleção consciente do responsável nem a prova de conexão ao Actual.
+
+Depois da correção, use `docker compose up -d bot` e confira `docker compose logs --tail=80 bot`. `CONFIG_INVALID` com campos corretos também pode indicar incompatibilidade com a identidade já gravada (residência, orçamento, responsável/chat ou bot). Preserve o banco e sua configuração anterior para revisar esse vínculo; não use remoção de volumes como tratamento.
 
 ## Verificações
 
@@ -22,7 +40,7 @@ node --test --test-isolation=none test/sdk.test.mjs test/sdk-mutations.test.mjs 
 docker compose -f compose.test.yaml run --build --rm tests
 ```
 
-O job CI `node` verifica sintaxe e testes; o job `container` executa a mesma suíte sem rede, como usuário sem privilégios, e constrói a imagem de execução. O healthcheck valida um heartbeat local recente (até 180s); não comprova disponibilidade de Actual/Telegram. `/status` mostra última leitura e estados incertos.
+O job CI `node` verifica sintaxe e testes; o job `container` executa a mesma suíte sem rede, como usuário sem privilégios, e constrói a imagem de execução. Depois, o [teste da imagem de execução](../scripts/smoke-runtime.mjs) roda o pré-teste como UID 1000, com sistema de arquivos raiz somente para leitura, rede bloqueada e arquivos sintéticos; confere erros de configuração sem expor valores e preservação dos dados. O healthcheck valida um heartbeat local recente (até 180s); não comprova disponibilidade de Actual/Telegram. `/status` mostra última leitura e estados incertos.
 
 `test:sdk` executa o teste básico `sdk.test.mjs`; o comando seguinte cobre também mutação, proteção de agendas e catálogo. `npm test` inclui todos eles e o [aceite público de recorrências](../test/mvp-bills-acceptance.test.mjs). Consulte o resultado de CI do SHA que será implantado; um teste local não comprova a imagem ou as credenciais de produção.
 
@@ -34,7 +52,7 @@ O SDK 26.9.0 é carregado com uma transformação restrita em memória que imped
 
 | Código | Ação |
 | --- | --- |
-| `CONFIG_INVALID` | Confira schema/IDs e o vínculo existente; não apague o banco para forçar uma mudança sem revisar o histórico |
+| `CONFIG_INVALID` | Execute o pré-teste e confira campo/motivo estáticos, arquivo/JSON/caminhos/IDs e o vínculo existente; não apague o banco para forçar uma mudança sem revisar o histórico |
 | `SECRET_UNAVAILABLE` / `SECRET_PERMISSIONS` | Confira arquivo, referência, dono e acesso da conta do processo |
 | `ALREADY_RUNNING` | Outra instância pode deter o lock do volume; pare a instância duplicada e confirme filesystem local. Não remova o arquivo de lock |
 | `TELEGRAM_WEBHOOK_ACTIVE` | Há webhook configurado no bot escolhido; reveja o modo de recebimento |
