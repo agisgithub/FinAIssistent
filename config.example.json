@@ -12,5 +12,15 @@
     "encryptionPasswordRef": null
   },
   "privacy": { "externalProviders": false },
+  "ollama": {
+    "enabled": false,
+    "url": "http://127.0.0.1:11434",
+    "model": null,
+    "localOnlyConfirmed": false,
+    "allowPrivateAddress": false,
+    "timeoutMs": 30000,
+    "contextTokens": 8192,
+    "outputTokens": 256
+  },
   "dryRun": true
 }

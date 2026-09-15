@@ -48,7 +48,7 @@ export class TelegramClient {
   }
   async sendMessage(chatId, payload) {
     if (chatId !== this.config.telegram.chatId) throw new AppError('UNAUTHORIZED');
-    const result = await this.call('sendMessage', { ...payload, chat_id: chatId }, { delivery: true, timeoutMs: 15000 });
+    const result = await this.call('sendMessage', { ...payload, chat_id: chatId, link_preview_options: { is_disabled: true } }, { delivery: true, timeoutMs: 15000 });
     if (!Number.isSafeInteger(result?.message_id)) throw new AppError('DELIVERY_UNCERTAIN');
     return result.message_id;
   }

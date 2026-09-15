@@ -1,39 +1,46 @@
-import { AppError } from '../errors.mjs';
+import { AppError, errorCode } from '../errors.mjs';
+import { localToday, normalizeText } from '../finance/periods.mjs';
+import { DEFAULT_SCOPE, validateScope } from '../finance/analyze.mjs';
+import { parseQuery } from '../application/dispatch.mjs';
+import { executeQuery } from '../application/queries.mjs';
+import { renderQuery, renderScope, renderInterpretation } from '../reports/render.mjs';
+import { OllamaIntentClient } from '../llm/ollama.mjs';
 
-export function localToday(timezone, now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
-  const get = key => parts.find(p => p.type === key).value;
-  return `${get('year')}-${get('month')}-${get('day')}`;
-}
-const money = (amount, currency) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency }).format(amount / 100);
+export { localToday } from '../finance/periods.mjs';
+const HELP = 'Comandos: /status, /contas, /resumo, /gastos hoje|mes, /orcamento, /sem_categoria, /ralos e /escopo.\nPeríodo: YYYY-MM-DD YYYY-MM-DD; paginação: pagina 2.\nExemplos naturais: quanto gastei hoje?; resumo nos últimos seis meses.';
 
-export function createCommandHandler({ config, store, actual, now = () => new Date() }) {
+export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = new OllamaIntentClient(config) }) {
   return async request => {
+    const startedAt = performance.now();
+    const answer = (text, metadata = { provider: 'deterministic', reason: 'deterministic_parser', durationMs: Math.max(0, Math.round(performance.now() - startedAt)) }) => ({ text: `${text}\n\n${renderInterpretation(metadata)}`, metadata });
     store.assertIdentity(request.identity);
-    if (request.type !== 'message') return { text: 'Este botão não está disponível.' };
-    const command = request.text.toLowerCase().split(/\s+/)[0];
+    if (request.type !== 'message') return answer('Este botão não está disponível.');
+    const normalized = normalizeText(request.text);
+    const [command, ...args] = normalized.split(' ');
     if (command === '/status') {
       const state = store.status();
-      return { text: `FinAIssistent em execução.\nOrçamento vinculado. Modo: ${config.dryRun ? 'simulação' : 'operação'}.\nFila: ${state.queued}. Entregas incertas: ${state.uncertainDeliveries}. Operações incertas: ${state.uncertainOperations}.\nÚltima leitura: ${state.lastSnapshotAt ? new Date(state.lastSnapshotAt).toISOString() : 'ainda não realizada'}.` };
+      return answer(`FinAIssistent em execução.\nOrçamento vinculado. Modo: ${config.dryRun ? 'simulação' : 'operação'}.\nFila: ${state.queued}. Entregas incertas: ${state.uncertainDeliveries}. Operações incertas: ${state.uncertainOperations}.\nÚltima leitura: ${state.lastSnapshotAt ? new Date(state.lastSnapshotAt).toISOString() : 'ainda não realizada'}.`);
     }
-    if (!['/contas', '/gastos'].includes(command)) return { text: 'Comandos: /status, /contas, /gastos.' };
+    if (command === '/escopo') {
+      const choices = { padrao: DEFAULT_SCOPE, encerradas: { includeOffBudget: false, includeClosed: true }, fora_orcamento: { includeOffBudget: true, includeClosed: false }, todas: { includeOffBudget: true, includeClosed: true } };
+      if (args.length && (args.length !== 1 || !Object.hasOwn(choices, args[0]))) throw new AppError('INPUT_INVALID');
+      const scope = args.length ? choices[args[0]] : validateScope(store.getPreference('finance_scope', DEFAULT_SCOPE));
+      if (args.length) store.setPreference('finance_scope', scope);
+      return answer(renderScope(scope));
+    }
     const today = localToday(config.timezone, now());
-    const period = { start: today.slice(0, 7) + '-01', end: today };
-    const snapshot = await actual.snapshot(period);
-    store.saveSnapshot(snapshot);
-    if (!snapshot.coverage.complete) return { text: 'Consulta incompleta: uma ou mais contas não puderam ser lidas. Nenhum total completo será apresentado. Tente novamente.' };
-    if (command === '/contas') {
-      return { text: `Contas do Actual — saldos até ${period.end}\n${snapshot.accounts.map(a => `${a.name}: ${money(a.balance, config.currency)}${a.offBudget ? ' (fora do orçamento)' : ''}${a.closed ? ' (encerrada)' : ''}`).join('\n') || 'Nenhuma conta.'}\nSincronizado: ${snapshot.syncedAt}` };
-    }
-    const accountIds = new Set(snapshot.accounts.filter(a => !a.offBudget && !a.closed).map(a => a.id));
-    const transferPayees = new Set(snapshot.payees.filter(p => p.transferAccountId).map(p => p.id));
-    let gross = 0;
-    for (const t of snapshot.transactions) {
-      if (accountIds.has(t.accountId) && !t.isParent && !t.transferId && !transferPayees.has(t.payeeId) && t.amount < 0) {
-        gross -= t.amount;
-        if (!Number.isSafeInteger(gross)) throw new AppError('SNAPSHOT_INVALID');
+    let intent = parseQuery(request.text, { today }), metadata;
+    if (!intent) {
+      if (command.startsWith('/')) return answer(HELP);
+      try {
+        const result = await intentClient.interpret(request.text, { today });
+        intent = result.intent; metadata = result.metadata;
+      } catch (error) {
+        return answer(`Não consegui interpretar esta pergunta localmente. Código: ${errorCode(error)}.\n${HELP}\nOs comandos financeiros continuam disponíveis.`, { provider: 'ollama', model: config.ollama?.model, reason: 'local_intent', durationMs: Math.max(0, Math.round(performance.now() - startedAt)), failure: errorCode(error) });
       }
     }
-    return { text: `Despesas brutas de ${period.start} a ${period.end}: ${money(gross, config.currency)}.\nContas abertas dentro do orçamento; transferências e pais de splits excluídos. Estornos ainda não abatidos. Dia atual em andamento.\nFonte: Actual. Sincronizado: ${snapshot.syncedAt}` };
+    if (intent.kind === 'unsupported') return answer(`Esta pergunta não corresponde às consultas financeiras disponíveis. Reformule como uma consulta de gastos, resumo, orçamento, contas ou lançamentos sem categoria.\n${HELP}`, metadata);
+    const result = await executeQuery(intent, { config, store, actual, today });
+    return answer(renderQuery(result), metadata);
   };
 }

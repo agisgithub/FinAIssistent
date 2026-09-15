@@ -68,15 +68,16 @@ test('replayed ingress executes locally once, sends once, and unavailable Actual
 
 test('incomplete Actual snapshots never produce spending totals and outbox failure never reruns query', async t => {
   const { store, config, identity } = memoryStore(t);
-  let reads = 0;
+  let reads = 0, deliveredText;
   const handler = createCommandHandler({ config, store, actual: { snapshot: async () => {
-    reads++; return { id: 'snapshot', householdId: identity.householdId, budgetId: identity.budgetId, coverage: { complete: false } };
+    reads++; return { id: 'snapshot', householdId: identity.householdId, budgetId: identity.budgetId, timezone: config.timezone, currency: config.currency, coverage: { complete: false } };
   } } });
   acceptTelegramUpdate(update(1, '/gastos'), config, store);
   const context = { store, handler, telegram: { sendMessage: async (chat, payload) => {
-    assert.match(payload.text, /Consulta incompleta/); assert.equal(payload.text.includes('R$'), false); throw new AppError('DELIVERY_UNCERTAIN');
+    deliveredText = payload.text; throw new AppError('DELIVERY_UNCERTAIN');
   } }, logger: () => {} };
   await processOneJob(context); await processOneDelivery(context);
+  assert.match(deliveredText, /Consulta incompleta/); assert.equal(deliveredText.includes('R$'), false);
   store.recover();
   assert.equal(await processOneJob(context), false); assert.equal(await processOneDelivery(context), false);
   assert.equal(reads, 1); assert.equal(store.status().uncertainDeliveries, 1);

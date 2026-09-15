@@ -13,15 +13,23 @@ Projeto novo. Baseline: Node.js 24, ESM, `@actual-app/api` 26.9.0 e `better-sqli
 | Exclusividade do cache Actual | `storage.test.mjs` e testes Actual: lock liberável, serialização e timeout | 1A |
 | Leituras rastreáveis e completas | Testes Actual e Telegram: snapshot normalizado, sync falho e cobertura incompleta | 1A |
 | Inicialização executável | `main.test.mjs`: polling, fila e entrega simulados com encerramento | 1A |
-| Cálculos, períodos e intenções locais | Implementação e fixtures financeiras completas | 1B |
+| Cálculos em centavos, splits/cartão/estornos/reversões e escopo | `finance.test.mjs`: fixture reconciliável e extremos inteiros | 1B |
+| Períodos locais inclusivos e consulta de seis meses | `periods.test.mjs`, `queries.test.mjs`: limites/fuso e parser sem IA | 1B |
+| Orçamento zero/ausente e carryover | `finance.test.mjs`, `queries.test.mjs`: fatos mensais e derivação de saldo separada | 1B |
+| Intenções locais somente leitura | `ollama.test.mjs`, `queries.test.mjs`: schema fechado, IDs extras recusados e indisponibilidade | 1B |
+| Paginação e dados desatualizados | `queries.test.mjs`: total integral, novas leituras e cache somente com período/escopo iguais | 1B |
 | Categorização confirmada e desfazer | Journal, precondições, patch de campo único e recuperação | 1C |
 | Relatório diário e alertas | Agenda persistente, ocorrência única e mudanças de severidade | 1D |
 | Recorrências confirmadas | Calendário, variações e pagamento vinculado | 2 |
 
 Gemini é uma fase opcional separada. E-mail, cofre, portais e automação sem confirmação são posteriores. O executor inicial não aceita pagamentos, transferências, exportação pelo chat nem métodos arbitrários.
 
-## Limites do marco 1A
+## Limites do marco 1B
 
-`/gastos` informa apenas despesas brutas do mês corrente. A classificação e o abatimento de estornos pertencem ao marco financeiro seguinte. Os callbacks são autenticados e persistidos, mas ainda respondem como indisponíveis. Trabalhos de comando são leituras repetíveis neste marco; ao adicionar mutações, a aprovação/operação persistente deve controlar sua idempotência e reconciliação.
+`/gastos` separa despesas brutas, estornos identificados e líquido. Entrada positiva em categoria de despesa é a regra de identificação de estorno; não é investigação documental. Receita categorizada não prova recorrência. `/ralos` oferece classificação descritiva por despesa líquida; não declara desperdício, fraude ou plano de economia garantido.
+
+O orçamento mensal é o envelope integral retornado pelo Actual e pode incluir transações posteriores à data final da consulta. A preferência de contas só altera os cálculos de transações, não esses fatos mensais. Diferença entre saldo antes do consumo e alocado é uma derivação; o campo `carryover` do SDK é booleano.
+
+Callbacks ainda respondem como indisponíveis. A preferência `/escopo` é uma atribuição local idempotente. Mutações financeiras, confirmação e desfazer serão implementados no marco 1C. Filhos de split aparecem nas consultas; a futura escrita por bot os bloqueará por limitação de preservação dos campos no SDK fixado.
 
 Os testes locais não substituem validação da imagem Linux/UID de produção, compatibilidade com o servidor Actual e demonstração controlada com o bot do responsável.

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { AppError } from './errors.mjs';
+import { validateOllamaConfig } from './llm/config.mjs';
 
 const bad = () => { throw new AppError('CONFIG_INVALID'); };
 function object(value, keys) {
@@ -9,7 +10,7 @@ function object(value, keys) {
 const ref = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value);
 const id = value => Number.isSafeInteger(value) && value > 0;
 export function validateConfig(input, baseDir = process.cwd()) {
-  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays']);
+  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama']);
   object(input.telegram, ['userId', 'chatId', 'tokenRef']);
   object(input.actual, ['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs']);
   const privacy = input.privacy ?? { externalProviders: false };
@@ -43,7 +44,8 @@ export function validateConfig(input, baseDir = process.cwd()) {
     householdId: input.householdId, timezone, currency, dataDir, secretDir, dryRun, retentionDays,
     telegram: Object.freeze({ ...input.telegram }),
     actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
-    privacy: Object.freeze({ externalProviders: false })
+    privacy: Object.freeze({ externalProviders: false }),
+    ollama: validateOllamaConfig(input.ollama)
   });
 }
 export async function loadConfig(filename = process.env.CONFIG_FILE ?? './config.json') {
