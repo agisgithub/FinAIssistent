@@ -72,15 +72,21 @@ test('exclusive process lock refuses contention and releases on connection close
 
 test('exclusive lock is released after its owning process is killed', { timeout: 10000 }, async t => {
   const directory = tempDirectory(t);
-  const source = 'const { acquireLock } = await import(process.argv[1]); acquireLock(process.argv[2]); process.stdout.write("locked\\n"); setInterval(() => {}, 1000);';
+  // Keep the release closure alive, just as main does. Discarding it lets GC
+  // finalize the Database and release the lock while this child is still alive.
+  const source = 'const { acquireLock } = await import(process.argv[1]); const release = acquireLock(process.argv[2]); process.once("SIGTERM", release); for (let i = 0; i < 4; i++) { global.gc(); await new Promise(resolve => setImmediate(resolve)); } process.stdout.write("LOCK_READY\\n"); setInterval(() => {}, 1000);';
   let child;
-  try { child = spawn(process.execPath, ['--input-type=module', '-e', source, pathToFileURL(path.resolve('src/storage/lock.mjs')).href, directory], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+  try { child = spawn(process.execPath, ['--expose-gc', '--input-type=module', '-e', source, pathToFileURL(path.resolve('src/storage/lock.mjs')).href, directory], { stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (error) { if (error.code === 'EPERM' && process.platform === 'win32' && !process.env.CI) { t.skip('Local Windows sandbox cannot spawn a child; Linux CI must exercise process crash recovery.'); return; } throw error; }
   const exited = once(child, 'exit');
   // Register an immediate catch because spawn failure emits error before exit.
   exited.catch(() => {});
   try {
-    try { await new Promise((resolve, reject) => { child.stdout.once('data', resolve); child.once('error', reject); child.once('exit', () => reject(new Error('Lock owner exited before readiness'))); }); }
+    try { await new Promise((resolve, reject) => {
+      let output = '';
+      child.stdout.on('data', chunk => { output += chunk.toString('utf8'); if (output.split('\n').includes('LOCK_READY')) resolve(); });
+      child.once('error', reject); child.once('exit', () => reject(new Error('Lock owner exited before readiness')));
+    }); }
     catch (error) { if (error.code === 'EPERM' && process.platform === 'win32' && !process.env.CI) { t.skip('Local Windows sandbox cannot spawn a child; Linux CI must exercise process crash recovery.'); return; } throw error; }
     assert.throws(() => acquireLock(directory), /ALREADY_RUNNING/);
     child.kill('SIGKILL');
