@@ -1,4 +1,6 @@
-# Agenda, preferências e alertas
+# Agenda de relatórios e alertas financeiros
+
+Este documento descreve as rotinas de relatório e alertas financeiros da fase 1D. A fase 2 acrescenta uma agenda independente de lembretes por recorrência, com políticas próprias e calendário local: veja [recorrências](recurrences.md#lembretes-variação-e-falhas). `/preferencias alertas desativar` desativa os alertas financeiros deste documento; lembretes/variação de contas são controlados por proposta em cada cadastro. Ambas as agendas compartilham a outbox e suas guardas de entrega.
 
 Implementação: [preferências](../src/reports/preferences.mjs), [horário civil](../src/jobs/civil-time.mjs), [scheduler](../src/jobs/scheduler.mjs), [persistência](../src/jobs/report-store.mjs) e [migração 003](../migrations/003_reports.sql). A agenda roda no processo FinAIssistent, com a mesma identidade autorizada do Telegram. Não usa modelo, serviço externo de agendamento ou credenciais adicionais.
 

@@ -12,6 +12,9 @@ import { ActualClient } from './actual/client.mjs';
 import { createCommandHandler } from './telegram/commands.mjs';
 import { runLoops } from './jobs/runtime.mjs';
 import { ReportScheduler } from './jobs/scheduler.mjs';
+import { BillService } from './application/bills.mjs';
+import { BillScheduler } from './jobs/bill-scheduler.mjs';
+import { Schedulers } from './jobs/schedulers.mjs';
 
 export async function main({ config: injectedConfig, actual: injectedActual, telegram: injectedTelegram, signal: injectedSignal, logger = createLogger(), handlerFactory = createCommandHandler } = {}) {
   process.umask(0o077);
@@ -32,8 +35,10 @@ export async function main({ config: injectedConfig, actual: injectedActual, tel
     store.bindTelegramBot((await telegram.getMe()).id);
     await telegram.assertPollingAvailable();
     actual = injectedActual ?? new ActualClient(config);
-    const scheduler = new ReportScheduler({ config, store, actual });
-    const handler = handlerFactory({ config, store, actual, reportScheduler: scheduler });
+    const billService = new BillService({ config, store, actual });
+    const reportScheduler = new ReportScheduler({ config, store, actual, upcomingProvider: options => billService.getUpcoming(options) });
+    const scheduler = new Schedulers([reportScheduler,new BillScheduler({ config, store, service: billService })]);
+    const handler = handlerFactory({ config, store, actual, reportScheduler, billService });
     logger('started');
     await runLoops({ config, store, handler, telegram, logger, scheduler, signal });
   } finally {

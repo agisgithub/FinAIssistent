@@ -71,7 +71,8 @@ export function normalizeSnapshot({ config, period, accounts, categories, catego
       id: rowId, accountId, date, amount: money(row.amount),
       payeeId: nullableId(row.payee ?? parent?.payee), notes: text(row.notes ?? ''),
       categoryId: nullableId(row.category), parentId, isParent, isChild,
-      transferId: nullableId(row.transfer_id), cleared: flag(row.cleared)
+      transferId: nullableId(row.transfer_id), cleared: flag(row.cleared),
+      reconciled: flag(row.reconciled), startingBalance: flag(row.starting_balance_flag), scheduleId: nullableId(row.schedule)
     });
     for (const child of children) visit(child, row);
   };
@@ -88,7 +89,7 @@ export function normalizeSnapshot({ config, period, accounts, categories, catego
   return {
     id: randomUUID(), householdId: config.householdId, budgetId: config.actual.budgetId,
     period: { ...period }, timezone: config.timezone, currency: config.currency,
-    syncedAt, createdAt: new Date().toISOString(), rulesVersion: '1',
+    syncedAt, createdAt: new Date().toISOString(), rulesVersion: '1', transactionMetadataVersion: '1',
     coverage: { complete: failedAccountIds.length === 0, failedAccountIds: [...failedAccountIds] },
     accounts: normalizedAccounts,
     categories: unique(categories.map(c => ({ id: id(c.id), name: text(c.name, 500), groupId: nullableId(c.group_id), isIncome: flag(c.is_income), hidden: flag(c.hidden) }))),

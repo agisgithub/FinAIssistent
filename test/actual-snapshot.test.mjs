@@ -68,6 +68,20 @@ test('safe-integer overflow in split totals is rejected even if each row is indi
   assert.throws(() => normalizeSnapshot(data), { code: 'SNAPSHOT_INVALID' });
 });
 
+test('fresh transaction metadata preserves schedule, reconciliation and opening flags without payment inference', () => {
+  const data = input();
+  data.transactions = [{ id: 'simple', account: 'account', date: '2026-09-15', amount: 5000, schedule: 'schedule', reconciled: 1, starting_balance_flag: true }];
+  const snapshot = normalizeSnapshot(data), row = snapshot.transactions[0];
+  assert.equal(snapshot.transactionMetadataVersion, '1');
+  assert.equal(row.scheduleId, 'schedule'); assert.equal(row.reconciled, true); assert.equal(row.startingBalance, true);
+  assert.equal(row.cleared, false); assert.equal(row.paid, undefined);
+  data.transactions[0].schedule = ''; data.transactions[0].reconciled = null; data.transactions[0].starting_balance_flag = 0;
+  const empty = normalizeSnapshot(data).transactions[0];
+  assert.equal(empty.scheduleId, null); assert.equal(empty.reconciled, false); assert.equal(empty.startingBalance, false);
+  data.transactions[0].starting_balance_flag = 'false';
+  assert.throws(() => normalizeSnapshot(data), { code: 'SNAPSHOT_INVALID' });
+});
+
 test('periods are inclusive, valid calendar dates, and limited to 24 months', () => {
   validatePeriod({ start: '2024-01-01', end: '2026-01-01' });
   validatePeriod({ start: '2024-02-29', end: '2024-02-29' });

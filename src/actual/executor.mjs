@@ -5,6 +5,7 @@ import { normalizeSnapshot, validatePeriod, validMonth } from './snapshot.mjs';
 import { inspectCurrent, readTransaction, transactionFingerprint, validateChange, validId } from './transaction.mjs';
 import { writeEncryptedBackup } from '../backups/encrypted.mjs';
 import { performance } from 'node:perf_hooks';
+import { normalizeSchedules } from './schedules.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 // Owns the SDK's global lifecycle. Production creates exactly one in its worker.
@@ -95,6 +96,16 @@ export class ActualExecutor {
         }
       }
       return normalizeSnapshot({ config: this.config, period, accounts: withBalances, categories, categoryGroups, payees, transactions, budgetMonths, syncedAt, failedAccountIds });
+    });
+  }
+  readSchedules() {
+    return this.runExclusive(async api => {
+      try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); }
+      const syncedAt = new Date().toISOString();
+      let schedules;
+      try { schedules = await api.getSchedules(); }
+      catch { throw new AppError('ACTUAL_FAILED'); }
+      return normalizeSchedules({ config: this.config, schedules, syncedAt });
     });
   }
   inspectTransaction(targetId) {

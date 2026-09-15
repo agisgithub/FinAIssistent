@@ -2,6 +2,8 @@
 
 Projeto novo. Baseline: Node.js 24, ESM, `@actual-app/api` 26.9.0 e `better-sqlite3` 12.11.1. Um responsável, uma residência, um orçamento e BRL.
 
+O escopo do MVP reúne as fases 1A–1D e 2. As provas abaixo são testes locais reproduzíveis, com integrações simuladas e orçamento SDK descartável. A aprovação de CI pertence ao commit publicado; esta matriz não declara que um commit ainda não publicado passou no CI.
+
 ## Mapa de requisitos
 
 | Requisito | Prova | Marco |
@@ -20,11 +22,17 @@ Projeto novo. Baseline: Node.js 24, ESM, `@actual-app/api` 26.9.0 e `better-sqli
 | Paginação e dados desatualizados | `queries.test.mjs`: total integral, novas leituras e cache somente com período/escopo iguais | 1B |
 | Categorização confirmada e desfazer | Journal, precondições, patch de campo único e recuperação | 1C |
 | Relatório diário e alertas | `scheduler.test.mjs`, `reports.test.mjs`, `alerts-domain.test.mjs`: ativação explícita, DST, recuperação, atomicidade, reavaliação e transições com histerese | 1D |
-| Recorrências confirmadas | Calendário, variações e pagamento vinculado | 2 |
+| Agendas Actual observadas sem execução automática | `actual-schedules.test.mjs`, `sdk-schedules.test.mjs`, `sdk-safety.test.mjs`: catálogo, metadata, guarda de autopost e reload | 2 |
+| Unidades e candidatos de três meses | `recurrence-domain.test.mjs`, `bills.test.mjs`: IDs/unidades isolados, pendências, versões históricas e hipótese inativa | 2 |
+| Competência, vencimento e calendário | `recurrence-domain.test.mjs`, `bills.test.mjs`: offset 0/1, dia 31/ano bissexto, estimativa, versões e overrides | 2 |
+| Compatibilidade sem inferir quitação | `recurrence-domain.test.mjs`, `bills.test.mjs`: concorrentes, cobertura, fingerprints, revogação e pagamento manual separado | 2 |
+| Propostas locais e migração | `bills.test.mjs`: identidade/política/prazo/replay, atomicidade, recuperação e upgrade 003→004 com dados anteriores | 2 |
+| Lembretes offline e variação | `bills.test.mjs`: opt-in, DST/restart, cancelamento/429, limites AND, histerese e fonte atual | 2 |
+| Aceite pelo fluxo público Telegram | `mvp-bills-acceptance.test.mjs`: ingresso, handler, jobs/outbox e SQLite em disco; unidade/conta confirmadas, Actual/LLM indisponíveis, aviso sem duplicar e pago/reabrir confirmados | 2 |
 
-Gemini é uma fase opcional separada. E-mail, cofre, portais e automação sem confirmação são posteriores. O executor inicial não aceita pagamentos, transferências, exportação pelo chat nem métodos arbitrários.
+Gemini é uma fase opcional separada. E-mail, cofre, portais e automação de escrita financeira sem confirmação são posteriores. O executor não aceita pagamentos bancários, transferências, exportação pelo chat nem métodos arbitrários.
 
-## Limites do marco 1B
+## Consultas e categorização
 
 `/gastos` separa despesas brutas, estornos identificados e líquido. Entrada positiva em categoria de despesa é a regra de identificação de estorno; não é investigação documental. Receita categorizada não prova recorrência. `/ralos` oferece classificação descritiva por despesa líquida; não declara desperdício, fraude ou plano de economia garantido.
 
@@ -34,10 +42,18 @@ A preferência `/escopo` é uma atribuição local idempotente. No marco 1C, a c
 
 Os testes locais não substituem validação da imagem Linux/UID de produção, compatibilidade com o servidor Actual e demonstração controlada com o bot do responsável.
 
-## Limites do marco 1D
+## Relatórios e alertas financeiros
 
 `/relatorio` é uma consulta imediata. Diário e alertas periódicos só começam após ativação separada em `/preferencias`; nenhum modelo é necessário. A agenda considera o horário civil escolhido e mantém uma ocorrência por data civil; o relatório preserva a data financeira do instante agendado. O reinício recupera somente a última ocorrência devida de cada rotina. [Políticas de horário, cancelamento e persistência](scheduling.md).
 
 Anomalias são desvios estatísticos descritivos com ao menos oito observações comparáveis anteriores. Novos alvos usam os últimos 30 dias; a base e os alvos acompanhados usam a leitura de 12 meses. Ausência fora dessa cobertura, dado desconhecido, snapshot incompleto e Actual indisponível não comprovam resolução. Alertas dependem de transições persistidas e têm limite de 20 novos avisos por varredura; os excedentes continuam elegíveis para a próxima leitura. [Fórmulas e limites](reporting.md).
 
-Recorrências, calendário de vencimentos confirmado, Gemini, e-mail e cofre permanecem fora deste marco. Os testes da agenda usam relógio controlado e dados sintéticos; não constituem demonstração de mensagens agendadas no bot real.
+## Recorrências e limites do MVP
+
+Cadastros mensais e unidades usam propostas de uso único. Confirmações persistem localmente mesmo em `dryRun`; o modo continua protegendo a escrita de categoria no Actual. Competência não é data de lançamento ou vencimento: dia, offset 0/1 e classificação estimada/confirmada são escolhas explícitas. O calendário aplica último dia do mês quando necessário e não ajusta feriados. Fonte Actual é observação; regras semanais/anuais, `endN` e fim de semana não são copiadas para a regra mensal. [Guia de recorrências](recurrences.md).
+
+Três meses consecutivos podem formar candidato, sem ativação automática. Unidade é resolvida por atribuição explícita ou mapeamento inequívoco de IDs; históricos conflitantes permanecem pendentes. Matching usa janela ±7 dias e cobertura completa, com todos os concorrentes materializados. Compatibilidade, `cleared` e vínculo de agenda nunca comprovam pagamento. `/pago` e `/reabrir` exigem novas confirmações; documento permanece não verificado.
+
+Lembretes conhecidos usam somente o calendário local e continuam com Actual/modelo indisponíveis. Cada cadastro começa com lembretes e variação desligados. Variação exige leitura fresca, referência conhecida e diferença estritamente maior que ambos os limites (padrões 20% e 2000 centavos); estados persistidos e histerese evitam repetição do mesmo episódio. Entrega Telegram incerta não é reenviada automaticamente.
+
+Os testes usam relógio controlado e dados sintéticos; não constituem demonstração de mensagens no bot real, conexão ao servidor pessoal, pagamento ou recebimento documental. Dados reais e implantação pessoal precisam das verificações do [runbook](runbook.md). E-mail, cofre, portais, expansão geral de agendas SDK e execução bancária não fazem parte do MVP.

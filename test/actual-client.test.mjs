@@ -71,6 +71,30 @@ test('timeout awaits worker termination before rejecting or opening a replacemen
   await client.close();
 });
 
+test('schedule reads use closed RPC, queue with snapshots and await retirement on timeout', async () => {
+  let finishTermination, announceTermination;
+  const terminating = new Promise(resolve => { announceTermination = resolve; });
+  const retired = new Promise(resolve => { finishTermination = resolve; });
+  const workers = [];
+  const client = new ActualClient({ ...config, actual: { ...config.actual, timeoutMs: 20 } }, { createWorker() {
+    const worker = new FakeWorker();
+    if (!workers.length) worker.terminate = async () => { announceTermination(); await retired; worker.emit('exit', 1); };
+    else worker.postMessage = message => { worker.messages.push(message); queueMicrotask(() => worker.respond('fresh')); };
+    workers.push(worker); return worker;
+  } });
+  const first = client.readSchedules().catch(error => error), second = client.snapshot(period);
+  await terminating;
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].messages[0].operation, 'readSchedules');
+  assert.equal(workers[0].messages[0].args, undefined);
+  finishTermination();
+  assert.equal((await first).code, 'ACTUAL_TIMEOUT'); assert.equal(await second, 'fresh');
+  assert.equal(workers.length, 2);
+  await client.close();
+  await assert.rejects(client.readSchedules(), { code: 'SHUTTING_DOWN' });
+  assert.equal(client.getSchedules, undefined); assert.equal(client.createSchedule, undefined);
+});
+
 test('worker crash and malformed error text never leak; failed termination prevents replacement', async () => {
   let worker, created = 0;
   const client = new ActualClient(config, { createWorker() {

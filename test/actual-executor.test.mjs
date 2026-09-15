@@ -18,6 +18,7 @@ async function fixture(t, overrides = {}) {
     getCategories: [{ id: 'category', name: 'Synthetic category', group_id: 'group' }],
     getCategoryGroups: [{ id: 'group', name: 'Synthetic group' }],
     getPayees: [], getBudgetMonths: ['2026-08', '2026-09', '2026-10'],
+    getSchedules: [{ id: 'schedule', rule: 'rule', next_date: '2026-09-30', completed: false, posts_transaction: false, amount: -100, amountOp: 'is', date: '2026-09-30' }],
     getBudgetMonth: { month: '2026-09', totalBudgeted: 10000, totalSpent: -100, totalBalance: 9900, categoryGroups: [] },
     getAccountBalance: 4900,
     getTransactions: [{ id: 'transaction', account: 'account-a', date: '2026-09-15', amount: -100, category: 'category' }]
@@ -91,4 +92,28 @@ test('wrong budget month and malformed SDK lists fail with sanitized codes', asy
   await assert.rejects(f.executor.snapshot(period), { code: 'SNAPSHOT_INVALID' });
   const malformed = await fixture(t, { getAccounts: async () => ({ data: [] }) });
   await assert.rejects(malformed.executor.snapshot(period), { code: 'SNAPSHOT_INVALID' });
+});
+
+test('schedule catalog uses the same serialized lifecycle and explicit sync without backup credentials', async t => {
+  const f = await fixture(t);
+  const [first, snapshot, second] = await Promise.all([f.executor.readSchedules(), f.executor.snapshot(period), f.executor.readSchedules()]);
+  assert.equal(first.schedules[0].fingerprint, second.schedules[0].fingerprint);
+  assert.equal(snapshot.coverage.complete, true);
+  assert.equal(f.maxActive, 1);
+  assert.deepEqual(f.calls.slice(0, 4).map(call => call.method), ['init', 'downloadBudget', 'sync', 'getSchedules']);
+  assert.equal(f.calls.filter(call => call.method === 'sync').length, 3);
+  assert.equal(f.calls.filter(call => call.method === 'getSchedules').length, 2);
+  assert.deepEqual(f.secrets, ['password', 'encryption']);
+  await f.executor.close();
+  await assert.rejects(f.executor.readSchedules(), { code: 'SHUTTING_DOWN' });
+});
+
+test('schedule sync and malformed catalog errors stop without leaking SDK text or returning partial success', async t => {
+  const sync = await fixture(t, { sync: async () => { throw new Error('private server URL'); } });
+  await assert.rejects(sync.executor.readSchedules(), { code: 'ACTUAL_SYNC_FAILED', message: 'ACTUAL_SYNC_FAILED' });
+  assert.equal(sync.calls.some(call => call.method === 'getSchedules'), false);
+  const malformed = await fixture(t, { getSchedules: async () => [{ id: 'missing-other-fields' }] });
+  await assert.rejects(malformed.executor.readSchedules(), { code: 'SNAPSHOT_INVALID' });
+  const failed = await fixture(t, { getSchedules: async () => { throw new Error('private schedule name'); } });
+  await assert.rejects(failed.executor.readSchedules(), { code: 'ACTUAL_FAILED', message: 'ACTUAL_FAILED' });
 });

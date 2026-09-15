@@ -44,8 +44,8 @@ function upcomingText(upcoming, reportDate, size, compact = false) {
   const through = end.toISOString().slice(0, 10);
   for (const item of upcoming.items) if (!item || typeof item.name !== 'string' || !validDate(item.dueDate) || !['confirmed', 'estimated'].includes(item.dateKind) || (item.amountCents !== null && !Number.isSafeInteger(item.amountCents))) throw new AppError('INPUT_INVALID');
   const items = upcoming.items.filter(item => item.dueDate >= reportDate && item.dueDate <= through).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
-  if (!items.length) return upcoming.registeredCount === 0 ? 'Próximos vencimentos: nenhuma recorrência cadastrada.' : `Próximos vencimentos: nenhum vencimento confirmado informado de ${reportDate} a ${through}.`;
-  return `Próximos vencimentos, ${reportDate} a ${through}:\n${items.slice(0, size).map(item => `${item.dueDate} (${item.dateKind === 'confirmed' ? 'confirmado' : 'estimado'}): ${label(item.name, compact ? 32 : 90)}, ${money(item.amountCents)}.`).join('\n')}${items.length > size ? `\nExibidos ${size} de ${items.length}; /proximos_vencimentos para a lista.` : ''}`;
+  if (!items.length) return upcoming.registeredCount === 0 ? 'Próximos vencimentos — calendário local: nenhuma recorrência cadastrada.' : `Próximos vencimentos — calendário local: nenhum vencimento informado de ${reportDate} a ${through}.`;
+  return `Próximos vencimentos — calendário local, ${reportDate} a ${through}:\n${items.slice(0, size).map(item => `${item.dueDate} (${item.dateKind === 'confirmed' ? 'confirmado' : 'estimado'}): ${label(item.name, compact ? 32 : 90)}, ${money(item.amountCents)}.`).join('\n')}${items.length > size ? `\nExibidos ${size} de ${items.length}; /proximos_vencimentos para a lista.` : ''}`;
 }
 
 export function buildDailyReport(snapshot, { identity, reportDate, today, scope = DEFAULT_SCOPE, dataState = 'fresh', detail = 'summary', thresholds, upcoming, trackedAlerts = [] } = {}) {

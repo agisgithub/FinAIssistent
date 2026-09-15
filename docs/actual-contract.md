@@ -1,6 +1,6 @@
 # Contrato do adaptador Actual
 
-O adaptador usa `@actual-app/api` fixado em **26.9.0** (`package.json`). O dispatcher do worker aceita somente `snapshot`, `inspectTransaction`, `changeCategory` e `close` (`src/actual/worker.mjs`). A fila de `ActualClient` aguarda a terminação do worker vencido antes de permitir outro dono do mesmo cache; stdout/stderr do SDK não são encaminhados.
+O adaptador usa `@actual-app/api` fixado em **26.9.0** (`package.json`). O dispatcher do worker aceita somente `snapshot`, `readSchedules`, `inspectTransaction`, `changeCategory` e `close` (`src/actual/worker.mjs`). A fila de `ActualClient` aguarda a terminação do worker vencido antes de permitir outro dono do mesmo cache; stdout/stderr do SDK não são encaminhados.
 
 ## Proteção contra execução automática de agendas
 
@@ -13,6 +13,33 @@ A proteção permanece ativa durante toda a vida do worker, tanto com `dryRun:tr
 Versão, bytes ou padrão diferentes, SDK previamente importado, cache ESM que evite o hook ou ausência de aplicação comprovada da transformação abortam com `ACTUAL_FAILED`; não existe fallback para importar o SDK original. Uma atualização exige revisar a fonte e repetir a regressão sintética antes de atualizar os valores fixados. Os hooks síncronos são uma API pública ainda classificada como release candidate no Node 24; o projeto exige esse major e valida o caminho em Linux e Docker. [Documentação Node 24](https://nodejs.org/download/release/v24.18.0/docs/api/module.html).
 
 O teste compara o controle original com o protegido, repete leitura em novo worker no dia seguinte e verifica zero lançamentos automáticos, agendas/catálogos e `lastScheduleRun` preservados, inclusive após shutdown. No mesmo orçamento com agenda vencida, categorizar e restaurar null preservam os demais campos e o backup cifrado pode ser decifrado. Casos negativos cobrem versão, bytes retornados pelo hook e caches, antes da resolução de segredos. O hash do pacote no disco permanece igual.
+
+## Leitura de agendas e metadados de transações
+
+`ActualClient.readSchedules()` não recebe argumentos nem expõe um método SDK arbitrário. Usa o mesmo worker protegido, fila exclusiva, init/download, sync explícito e protocolo de timeout/terminação de `snapshot`. Não exige chave de backup. O envelope retornado contém:
+
+```js
+{
+  householdId, budgetId, timezone, currency, syncedAt, createdAt,
+  rulesVersion: 'schedules-1', coverage: { complete: true },
+  schedules: [{
+    id, name, ruleId, nextDate, completed, postsTransaction, payeeId, accountId,
+    amountCents, amountRange, amountOp, date, fingerprint
+  }]
+}
+```
+
+Nome, conta e favorecido ausentes permanecem null. `amountCents` preserva centavos assinados para `is`/`isapprox`; em `isbetween`, fica null e `amountRange` contém `{minCents,maxCents}`. O SDK ordena os extremos ao avaliar a condição; o adaptador também os ordena. O zero que o SDK atribui quando um valor foi omitido é preservado como zero registrado, sem virar estimativa. `date` mantém a data única ou os campos tipados da recorrência: frequency, start e opcionais interval, patterns, skipWeekend, endMode, endOccurrences, endDate, weekendSolveMode. Opcionais ausentes não recebem defaults no adaptador.
+
+Semanal, anual, último dia (`day:-1`), ordinal de dia da semana, fim após N ocorrências e ajuste de fim de semana são preservados. A camada de calendário decide se consegue expandir cada forma; uma forma tipada válida não é descartada por falta de suporte local. Datas inválidas, IDs duplicados, valores não inteiros/fora do intervalo seguro, operador/forma incompatível ou estrutura desconhecida recusam o catálogo inteiro com `SNAPSHOT_INVALID`. Os limites operacionais são 10.000 agendas por leitura e 1.000 padrões por regra. Falha de sync não produz um catálogo novo.
+
+O fingerprint SHA-256 inclui contexto, versão e todos os campos normalizados da agenda em ordem fixa; não inclui os horários de leitura. Renomear, alterar valor, vínculos, regra ou estado invalida a evidência anterior. `getSchedules()` exclui agendas removidas e inclui concluídas e vinculadas a contas encerradas. `completed` e `postsTransaction` são metadados do Actual; não há campo paid/status no contrato. O vínculo `scheduleId` de uma transação, sua reconciliação ou uma semelhança não confirma pagamento.
+
+Snapshots novos mantêm `rulesVersion:'1'` para as consultas financeiras e acrescentam `transactionMetadataVersion:'1'`. Cada transação passa a carregar `scheduleId`, `reconciled` e `startingBalance`, com null/booleanos canônicos compatíveis com a inspeção. Cache anterior sem esse marcador continua utilizável para consultas compatíveis, mas não comprova os campos que antes eram descartados nem promove evidência nova de recorrência.
+
+`test/sdk-schedules.test.mjs` usa sete agendas reais após remover uma oitava, incluindo nome/identidade omitidos, formas incomuns e agenda concluída em conta encerrada. A conclusão é preparada diretamente no SQLite descartável para representar estado existente; não há API pública inventada para alterar esse campo. O teste cria saldo inicial pela API real, lê uma transação reconciliada vinculada à agenda e confere `transactionFingerprint(snapshotTx) === inspectTransaction(id).fingerprint`. `test/sdk-safety.test.mjs` cobre também `readSchedules` no caminho real init/download/sync com resposta em memória e mantém a proteção contra autopost.
+
+Fontes fixadas: [APIScheduleEntity e conversão](https://github.com/actualbudget/actual/blob/v26.9.0/packages/loot-core/src/server/api-models.ts#L226-L254), [tipos de recorrência](https://github.com/actualbudget/actual/blob/v26.9.0/packages/loot-core/src/types/models/schedule.ts), [condição de intervalo monetário](https://github.com/actualbudget/actual/blob/v26.9.0/packages/loot-core/src/server/rules/condition.ts#L326-L336).
 
 ## Inspeção e pré-condição
 

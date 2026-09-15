@@ -7,15 +7,18 @@ import { renderQuery, renderScope, renderInterpretation } from '../reports/rende
 import { OllamaIntentClient } from '../llm/ollama.mjs';
 import { CategorizationActions } from '../application/actions.mjs';
 import { ReportScheduler } from '../jobs/scheduler.mjs';
+import { BillService } from '../application/bills.mjs';
 
 export { localToday } from '../finance/periods.mjs';
-const HELP = 'Consultas: /status, /contas, /resumo, /gastos hoje|mes, /comparar, /orcamento, /sem_categoria, /ralos e /escopo.\nRelatórios: /relatorio (consulta imediata); /preferencias para configurar e ativar diário ou alertas (desligados por padrão).\nCategorias: /categorias; /sugerir <transactionId>; /categorizar <transactionId> <categoryId>.\nOperações: /operacoes; /reconciliar <operationId>; /desfazer <operationId>. Toda alteração exige proposta e confirmação.\nPeríodo: YYYY-MM-DD YYYY-MM-DD; paginação: pagina 2.\nExemplo: /gastos com Mercado | ultimos 6 meses.\nPerguntas: quanto gastei hoje?; resumo nos últimos seis meses.';
+const HELP = 'Consultas: /status, /contas, /resumo, /gastos hoje|mes, /comparar, /orcamento, /sem_categoria, /ralos e /escopo.\nRelatórios: /relatorio (consulta imediata); /preferencias para configurar e ativar diário ou alertas (desligados por padrão).\nRecorrências locais: /unidades; /recorrencias ajuda; /proximos_vencimentos; /ocorrencia ID; /pago ID; /reabrir ID.\nCategorias: /categorias; /sugerir <transactionId>; /categorizar <transactionId> <categoryId>.\nOperações: /operacoes; /reconciliar <operationId>; /desfazer <operationId>. Toda alteração exige proposta e confirmação.\nPeríodo: YYYY-MM-DD YYYY-MM-DD; paginação: pagina 2.\nExemplo: /gastos com Mercado | ultimos 6 meses.\nPerguntas: quanto gastei hoje?; resumo nos últimos seis meses.';
 
-export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = new OllamaIntentClient(config), actionService = new CategorizationActions({ config, store, actual, now }), reportScheduler = new ReportScheduler({ config, store, actual, now: () => now().getTime() }) }) {
+export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = new OllamaIntentClient(config), actionService = new CategorizationActions({ config, store, actual, now }), billService = new BillService({ config, store, actual, now }), reportScheduler = new ReportScheduler({ config, store, actual, now: () => now().getTime(), upcomingProvider: options => billService.getUpcoming(options) }) }) {
   return async (request, job) => {
     const startedAt = performance.now();
     const answer = (text, metadata = { provider: 'deterministic', reason: 'deterministic_parser', durationMs: Math.max(0, Math.round(performance.now() - startedAt)) }) => ({ text: `${text}\n\n${renderInterpretation(metadata)}`, metadata });
     store.assertIdentity(request.identity);
+    const billResult = await billService.handle(request,job);
+    if (billResult) return billResult;
     const rawParts = request.type === 'message' ? request.text.trim().split(/\s+/) : [];
     if (rawParts[0]?.toLowerCase() === '/preferencias') return reportScheduler.configure(rawParts.slice(1), request.identity);
     if (rawParts[0]?.toLowerCase() === '/relatorio') {

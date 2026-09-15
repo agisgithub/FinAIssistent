@@ -6,9 +6,9 @@ Um orçamento, uma residência e um responsável são vinculados ao banco da apl
 
 Só são aceitas mensagens privadas do usuário configurado, com chat igual ao destino configurado. Bots, grupos, chats desconhecidos, mensagens encaminhadas e callbacks sem a identidade/chat esperados são recusados. Um update recusado guarda apenas ID, horário e indicador de autorização para poder avançar o cursor, sem conteúdo.
 
-Leituras são autorizadas pelo vínculo inicial; não pedem confirmação a cada uso. A única escrita implementada altera a categoria de um lançamento simples, mediante proposta específica de uso único. Não existe comando para chamar métodos arbitrários, executar código, pagar, transferir ou criar regras no Actual.
+Leituras são autorizadas pelo vínculo inicial; não pedem confirmação a cada uso. A única escrita no Actual altera a categoria de um lançamento simples, mediante proposta específica de uso único. Unidades, cadastros mensais e estados de ocorrências são alterações no SQLite local, também confirmadas por proposta. Não existe comando para chamar métodos SDK arbitrários, executar código, pagar, transferir ou criar regras no Actual. `/pago` registra somente uma declaração manual local. [Fluxo de recorrências](recurrences.md).
 
-## Propostas e confirmação
+## Propostas e confirmação de categoria
 
 `/categorizar <transactionId> <categoryId>` prepara uma proposta com identidade de usuário/chat/residência/orçamento, antes/depois, fingerprint versionado, categoria de destino completa, motivo, política e expiração de 15 minutos. O hash da política inclui servidor Actual, orçamento, modo de simulação, origem Telegram, versão, referências de backup e regras configuradas. O ID do job de origem é único: replay devolve a mesma proposta. Os IDs de categoria preservam maiúsculas/minúsculas.
 
@@ -19,6 +19,16 @@ Consumir a aprovação, reservar operação/item, desativar exemplos anteriores 
 Pais e filhos de splits, transferências, conta encerrada, conta fora do orçamento, saldo inicial e dados de elegibilidade ambíguos são recusados. O bloqueio de filhos de splits evita um defeito observado no SDK 26.9.0, descrito no [contrato Actual](actual-contract.md). Apenas `category` chega ao patch. Chave ausente/inválida ou qualquer falha de backup impede o patch. `dryRun: true` não chama a escrita nem cria exemplos reais.
 
 O registro antes do RPC e o bloqueio de repetição não transformam a API remota em uma transação distribuída. O Actual não fornece compare-and-swap; outro cliente pode editar entre verificações. O fingerprint detecta diferenças observáveis, mas não prova ausência de uma edição externa A→B→A. Desfazer bloqueia ciclos de operações locais pela linhagem do alvo.
+
+## Propostas locais de recorrência
+
+Unidade, cadastro/edição/pausa, atribuição de lançamento, rejeição de candidato, edição de ocorrência e pagamento/reabertura/cancelamento local usam propostas próprias de 15 minutos. O nonce aleatório de 18 bytes pertence à identidade e ao job de origem; callbacks `rf:`/`rx:` não se confundem com os de categorização. A política inclui residência, orçamento, servidor, responsável/chat, fuso, moeda e modo `dryRun`. Alterá-la invalida a proposta pendente. Fonte: [BillStore](../src/recurrence/store.mjs), `billPolicyHash`, `propose` e `confirm`.
+
+A proposta mostra os dados e efeitos locais. Confirmar aplica a mudança, consome o nonce, registra antes/depois e persiste a resposta final na mesma transação. Replay do mesmo job retorna o resultado já gravado; outro pedido com nonce consumido é recusado. Alterações do registro antes da confirmação geram conflito. Fontes de histórico/agenda e atribuições de lançamentos são relidas e verificadas por fingerprint antes do commit. Nenhum modelo interpreta ou aprova essa etapa. Fonte: [BillService](../src/application/bills.mjs), `confirm` e `applyProposal`.
+
+**`dryRun:true` permite esses efeitos locais confirmados.** O fluxo não chama escrita no Actual, não movimenta dinheiro e não exige a chave de backup de categorização. Datas de pagamento informadas e instante de confirmação ficam separados; ausência de data permanece ausente. Reabrir não desfaz pagamento bancário e cancelar não cancela serviço ou cobrança. Calendário, atribuições e histórico local precisam do backup operacional do estado.
+
+Lembretes e variação exigem ativação por cadastro, independente das preferências de relatórios. Propostas mostram dias/horário, data estimada ou confirmada, referência e limites. A guarda de entrega confere política, revisão, estado e evidência necessários antes de enviar; alteração relevante cancela pendências obsoletas. Mensagens já enviadas ou incertas permanecem no histórico. [Políticas e limites](recurrences.md#lembretes-variação-e-falhas).
 
 ## Resultado, reconciliação e desfazer
 
@@ -51,6 +61,8 @@ SQLite, snapshots, propostas, journal e outbox contêm dados financeiros e preci
 Payloads de jobs concluídos/falhos e mensagens enviadas são removidos após 24h. Snapshots seguem `retentionDays` (padrão 90). Após essa janela, propostas expiradas/canceladas/concluídas perdem alvo, antes/depois, exibição, motivo, catálogo do destino e chave de exemplo; permanecem os nonces inutilizáveis, identidade e metadados de deduplicação/política. Operações resolvidas (`applied`, `failed_before`, `simulated`, `observed_before`, `observed_after`) perdem antes/depois ao fim da janela desde a última atualização; desfazer fica indisponível após essa minimização. Exemplos expiram pela criação, são desativados e perdem alvo/características/categoria. Eventos antigos resolvidos têm payload minimizado; códigos, horários e vínculos técnicos ficam.
 
 Operações ainda `uncertain`, reservas em andamento e suas propostas mantêm os detalhes necessários à investigação. Dados de jobs/entregas incertas também permanecem. Não há retenção de prompts de categorização ou respostas completas de modelo: essa fase usa apenas regras, exemplos e histórico local. A retenção de arquivos de backup exige o procedimento local descrito na documentação de backups; a limpeza do SQLite não reescreve backups antigos.
+
+Recorrências têm retenção própria: payloads antigos de propostas encerradas/expiradas, eventos, candidatos e entregas terminais são minimizados; observações antigas são removidas. Estados incertos de entrega e chaves de deduplicação permanecem. Unidades, versões de cadastro, ocorrências pagas/canceladas e fingerprints de atribuição continuam como dados financeiros locais; não há purga automática desses fatos. A limpeza não apaga o journal de categorização. [Retenção detalhada](recurrences.md#confirmação-recuperação-e-retenção).
 
 ## Entrega e falhas
 

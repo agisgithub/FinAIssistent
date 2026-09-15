@@ -4,9 +4,9 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-Fases 0 a 1D: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização de um lançamento por proposta confirmada e relatórios/alertas opcionais. A fila, as mensagens, as propostas, as operações e a agenda ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas funcionam por regras locais; Ollama opcional interpreta outras perguntas de leitura.
+O MVP reúne as fases 0 a 1D e 2: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; Ollama opcional interpreta outras perguntas de leitura.
 
-O MVP ainda depende das recorrências confirmadas. E-mail, cofre, portais e Gemini são posteriores.
+Unidades, recorrências e registros manuais de pagamento exigem confirmação no Telegram. Lembretes de datas cadastradas e consultas ao calendário funcionam mesmo sem Actual ou modelo disponíveis. E-mail, cofre, portais e Gemini ficam fora deste MVP; não há execução de pagamento bancário. [Escopo e provas](docs/scope.md).
 
 O carregamento do SDK inclui uma [proteção verificada para a versão fixada](docs/actual-contract.md#proteção-contra-execução-automática-de-agendas): consultas não acionam o serviço automático de agendas do Actual. Uma versão ou arquivo diferente bloqueia o adaptador até nova revisão; não atualize o SDK isoladamente.
 
@@ -57,8 +57,18 @@ Antes de conectar dados reais, siga o [runbook](docs/runbook.md). O exemplo reje
 | `/operacoes [operationId]` | Lista operações ou consulta novamente o resultado de uma operação |
 | `/reconciliar <operationId>` | Lê o estado atual sem repetir a alteração |
 | `/desfazer <operationId>` | Prepara uma nova proposta de restauração da categoria anterior |
+| `/unidades` e `/unidade cadastrar nome="Apartamento"` | Lista unidades ou prepara uma unidade local |
+| `/recorrencias` | Cadastros mensais vigentes e versões futuras; `/recorrencias ajuda` mostra os campos |
+| `/recorrencias pendencias` ou `candidatos` | Relê o histórico e mostra atribuições de unidade pendentes ou hipóteses sem ativação automática |
+| `/recorrencias favorecidos` ou `agendamentos` | IDs do catálogo Actual e agendas observadas como fonte |
+| `/recorrencias atualizar` | Relê e confronta lançamentos com ocorrências, sem marcar pagamento |
+| `/recorrencia cadastrar`, `editar`, `atribuir`, `rejeitar` ou `pausar` | Prepara alteração local; veja a [gramática completa](docs/recurrences.md) |
+| `/recorrencia confirmar <código>` ou botão | Confirma uma proposta local, inclusive com `dryRun:true` |
+| `/recorrencia cancelar_proposta <código>` | Cancela uma proposta local pendente |
+| `/proximos_vencimentos [YYYY-MM]` e `/ocorrencia <id>` | Calendário e detalhes locais; não dependem de nova leitura Actual |
+| `/pago <id> [data=YYYY-MM-DD]`, `/reabrir <id>`, `/cancelar_ocorrencia <id>` | Prepara mudança de estado local, sem movimentar dinheiro |
 
-O período padrão começa no primeiro dia do mês e termina hoje. Também são aceitos `2026-08-01 2026-08-31`, `mes passado` e `ultimos 6 meses` (seis meses de calendário incluindo o atual). Listas têm dez itens por página e fornecem o próximo comando, por exemplo `/sem_categoria 2026-08-01 2026-08-31 pagina 2`. A paginação não limita o conjunto usado nas somas.
+O período padrão começa no primeiro dia do mês e termina hoje. Também são aceitos `2026-08-01 2026-08-31`, `mes passado` e `ultimos 6 meses` (seis meses de calendário incluindo o atual). Listas de consultas financeiras têm dez itens por página e fornecem o próximo comando, por exemplo `/sem_categoria 2026-08-01 2026-08-31 pagina 2`. Listas de recorrências têm cinco registros por página. A paginação não limita o conjunto usado nas somas.
 
 Um snapshot incompleto não produz totais. Se o Actual ficar indisponível, somente um snapshot com período, identidade e escopo iguais pode fornecer valores, destacados como **desatualizados**; caso contrário, a resposta mostra a indisponibilidade sem total. Uma consulta nova sempre tenta ler novamente o Actual, refletindo alterações retroativas.
 
@@ -68,7 +78,7 @@ Ollama fica desligado no exemplo. Consulte a [configuração local e privacidade
 
 ## Categorização e recuperação
 
-`dryRun` é `true` por padrão. Nesse modo, a confirmação registra uma **simulação**, sem alterar o Actual nem alimentar exemplos confirmados. Para escrita real, configure `dryRun: false` e `backup.keyRef` com o nome de um arquivo secreto contendo uma chave aleatória de 32 bytes em hexadecimal (64 dígitos). O valor da chave não pertence ao JSON. Consulte [backups cifrados](docs/backups.md) para proteção, retenção e recuperação local.
+`dryRun` é `true` por padrão. Nesse modo, confirmar **categorização** registra uma simulação, sem alterar o Actual nem alimentar exemplos confirmados. Confirmações de unidades, recorrências e ocorrências persistem no SQLite mesmo nesse modo; a proposta explica o efeito local. Para escrita real de categoria, configure `dryRun: false` e `backup.keyRef` com o nome de um arquivo secreto contendo uma chave aleatória de 32 bytes em hexadecimal (64 dígitos). O valor da chave não pertence ao JSON. Consulte [backups cifrados](docs/backups.md) para proteção, retenção e recuperação local.
 
 Uma proposta mostra data, valor, conta, favorecido, grupos, IDs e a categoria anterior/nova. Ela dura 15 minutos, pertence ao responsável/chat/orçamento configurados e autoriza somente o campo categoria daquele lançamento. Pais e filhos de splits, transferências, saldo inicial, contas encerradas e contas fora do orçamento são bloqueados para escrita. Mudanças no lançamento, no destino ou na política invalidam a confirmação.
 
@@ -104,7 +114,25 @@ O exemplo de saldo configura R$ 100,00 para um ID real copiado de `/contas`; o c
 
 O diário usa os dias/horário/fuso escolhidos. Alertas verificam condições a cada 15 minutos, todos os dias, e avisam entrada ou aumento de severidade; a margem de saída evita repetição perto do limite. A data financeira vem do instante agendado no fuso do orçamento. No reinício, cada rotina considera apenas sua última ocorrência perdida, sem enviar as anteriores nem datas anteriores à ativação. Alterar detalhe ou limites não repete um diário já reservado.
 
-Os relatórios tentam reler 12 meses do Actual e identificam snapshot, sincronização e escopo. A falta de leitura completa não atualiza nem resolve alertas. Um relatório diário/manual pode mostrar cache estritamente compatível, marcado como desatualizado. Vencimentos permanecem indicados como calendário não configurado até a fase de recorrências. `dryRun` protege alterações no Actual; não bloqueia relatórios e alertas explicitamente ativados. Veja [agenda e recuperação](docs/scheduling.md) e [regras dos relatórios](docs/reporting.md).
+Os relatórios tentam reler 12 meses do Actual e identificam snapshot, sincronização e escopo. A falta de leitura completa não atualiza nem resolve alertas financeiros. Um relatório diário/manual pode mostrar cache estritamente compatível, marcado como desatualizado. A seção de vencimentos recebe o calendário local; `/proximos_vencimentos` continua disponível quando faltam dados para um relatório financeiro. `dryRun` protege alterações no Actual e permite relatórios e alertas explicitamente ativados. Veja [agenda e recuperação](docs/scheduling.md) e [regras dos relatórios](docs/reporting.md).
+
+## Recorrências por unidade
+
+Crie e confirme uma unidade, copie seus IDs e os de conta/favorecido dos catálogos, e prepare um cadastro. Este exemplo é fictício e precisa dos IDs exibidos pelo bot:
+
+```text
+/unidade cadastrar nome="Apartamento"
+/unidades
+/contas
+/recorrencias favorecidos
+/recorrencia cadastrar nome="Energia" unidade=ID_UNIDADE favorecido=ID_FAVORECIDO conta=ID_CONTA inicio=2026-09 dia=10 mes_offset=1 tipo_data=confirmado valor_centavos=10000 lembretes=sim
+```
+
+Confirme cada proposta antes de seguir. Nesse exemplo, a competência setembro vence em 10 de outubro, com referência de R$ 100,00. Mês curto usa o último dia e preserva o dia escolhido para o seguinte. Se o vencimento for desconhecido, escolha `tipo_data=estimado`; se faltar valor, use `valor_centavos=desconhecido`. A estimativa fica identificada.
+
+Lembretes e variação começam desligados por cadastro; `lembretes=sim` ativa avisos de 7/3/1 dias, às 08:00 no fuso financeiro, somente após a confirmação. Essas políticas são separadas de `/preferencias` dos relatórios. O calendário local mantém os avisos quando o Actual está indisponível; nova evidência de lançamento e alertas de variação dependem de leitura completa. Variação exige **mais de 20% e mais de R$ 20,00**, com limites configuráveis e controle de repetição.
+
+Três meses consecutivos de histórico com unidade/IDs resolvidos podem gerar um candidato inativo. Uma agenda Actual também pode servir de fonte observada; o cadastro local é mensal e não copia silenciosamente regras semanais, anuais, fim após N ocorrências ou ajustes de fim de semana. Um lançamento compatível nunca marca uma conta paga. `/pago`, `/reabrir` e cancelamento são novas propostas locais; documento permanece não verificado. Veja [cadastro, estados, edição e recuperação](docs/recurrences.md).
 
 ## Exemplo fictício verificável
 
@@ -137,5 +165,7 @@ node --test --test-isolation=none test/finance.test.mjs test/periods.test.mjs te
 - [Backups cifrados](docs/backups.md)
 - [Agenda, preferências e recuperação dos alertas](docs/scheduling.md)
 - [Regras de relatórios e anomalias](docs/reporting.md)
+- [Recorrências, unidades e calendário local](docs/recurrences.md)
+- [Regras de histórico, calendário e compatibilidade](docs/recurrence-domain.md)
 
 Os testes usam dados sintéticos e adaptadores simulados, além do teste isolado do SDK fixado. Não comprovam conexão ao orçamento, bot ou servidor de produção.

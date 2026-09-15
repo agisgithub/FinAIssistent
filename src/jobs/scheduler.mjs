@@ -11,8 +11,8 @@ import { ReportStore } from './report-store.mjs';
 
 export const ALERT_INTERVAL_MS=15*60*1000;
 export class ReportScheduler {
-  constructor({config,store,actual,now=()=>store.now(),buildReport=buildDailyReport,reportPeriod=dailyReportPeriod}) {
-    Object.assign(this,{config,store,actual,now,buildReport,reportPeriod});
+  constructor({config,store,actual,now=()=>store.now(),buildReport=buildDailyReport,reportPeriod=dailyReportPeriod,upcomingProvider=()=>({available:false,items:[]})}) {
+    Object.assign(this,{config,store,actual,now,buildReport,reportPeriod,upcomingProvider});
     this.preferences=new ReportPreferences({config,store,now}); this.repository=new ReportStore(store); this.identity=identityFromConfig(config);
   }
   scope() { return validateScope(this.store.getPreference('finance_scope',DEFAULT_SCOPE)); }
@@ -72,7 +72,8 @@ export class ReportScheduler {
     return {snapshot,dataState:'fresh',code:null};
   }
   render(snapshot,{reportDate,scope,dataState,prefs}) {
-    return this.buildReport(snapshot,{reportDate,today:localToday(this.config.timezone,new Date(this.now())),scope,dataState,detail:prefs.detail,thresholds:prefs.thresholds,identity:this.identity,trackedAlerts:this.repository.trackedAlerts(snapshot),upcoming:{available:false,items:[]}});
+    const upcoming=this.upcomingProvider({from:reportDate,to:new Date(Date.parse(reportDate+'T12:00:00Z')+7*86400000).toISOString().slice(0,10)});
+    return this.buildReport(snapshot,{reportDate,today:localToday(this.config.timezone,new Date(this.now())),scope,dataState,detail:prefs.detail,thresholds:prefs.thresholds,identity:this.identity,trackedAlerts:this.repository.trackedAlerts(snapshot),upcoming});
   }
   unavailable(reportDate,dataState,code,durationMs) {
     return withActionMetadata({text:`Relatório de ${reportDate} indisponível: ${dataState==='incomplete'?'leitura incompleta':'Actual indisponível e sem snapshot compatível'}. Nenhum total foi calculado. Código: ${code}.`},{reason:'daily_report',durationMs,failure:code});
@@ -122,4 +123,5 @@ export class ReportScheduler {
     }
     return withActionMetadata({text:renderPreferences(this.preferences.command(args,identity))},{reason:'report_preferences',durationMs:Math.max(0,Math.round(performance.now()-start))});
   }
+  prune(days){this.repository.prune(days);}
 }

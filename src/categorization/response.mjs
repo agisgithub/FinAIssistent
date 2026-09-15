@@ -10,7 +10,10 @@ const reasons = Object.freeze({
   command_error: 'falha no processamento do comando',
   report_preferences: 'preferências locais de relatório e alertas',
   daily_report: 'relatório determinístico solicitado',
-  alert_transition: 'mudança de severidade confirmada em leitura completa'
+  alert_transition: 'mudança de severidade confirmada em leitura completa',
+  bill_command: 'cadastro e calendário locais de recorrências',
+  bill_reminder: 'lembrete do calendário local confirmado',
+  bill_variation: 'variação em lançamento compatível; pagamento não confirmado'
 });
 
 // This wrapper is used before durable enqueue as well as at the action boundary.

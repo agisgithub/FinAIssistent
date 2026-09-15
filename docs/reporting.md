@@ -79,7 +79,7 @@ O domínio retorna candidatos; a integração decide quais transições persisti
 
 ## Extensão de vencimentos
 
-Na fase 1D, a ausência de calendário resulta em “calendário ainda não configurado”. Uma lista vazia não comprova que nenhuma conta existe. A fase 2 pode injetar:
+O domínio aceita o calendário por injeção. Sem essa fonte, informa “calendário ainda não configurado”; uma lista vazia não comprova que nenhuma conta existe. No MVP, `ReportScheduler.upcomingProvider` recebe `BillService.getUpcoming`, que consulta os cadastros locais sem leitura Actual. A forma é:
 
 ```js
 upcoming: {
@@ -91,7 +91,7 @@ upcoming: {
 }
 ```
 
-Datas confirmadas e estimadas são identificadas individualmente. Só `registeredCount: 0`, informado pela integração, autoriza dizer que nenhuma recorrência está cadastrada. A janela exibida vai da data do relatório até sete dias depois, inclusive; isso não consulta transações futuras nem confirma um pagamento.
+Datas confirmadas e estimadas são identificadas individualmente. Só `registeredCount: 0`, informado pela integração, autoriza dizer que nenhuma recorrência está cadastrada. A janela exibida vai da data do relatório até sete dias depois, inclusive; isso não consulta transações futuras nem confirma um pagamento. Os itens usam a versão vigente, com unidade no rótulo; ocorrências pagas/canceladas, pausadas ou fora da faixa ativa ficam fora dos próximos vencimentos. [Cadastro e estados locais](recurrences.md).
 
 ## Provas
 

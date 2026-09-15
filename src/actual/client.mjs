@@ -94,6 +94,13 @@ export class ActualClient {
     return task;
   }
 
+  readSchedules() {
+    if (this.#closing) return Promise.reject(new AppError('SHUTTING_DOWN'));
+    const task = this.#tail.then(() => this.#request('readSchedules'));
+    this.#tail = task.catch(() => {});
+    return task;
+  }
+
   inspectTransaction(targetId) {
     if (this.#closing) return Promise.reject(new AppError('SHUTTING_DOWN'));
     if (!validId(targetId)) return Promise.reject(new AppError('INPUT_INVALID'));

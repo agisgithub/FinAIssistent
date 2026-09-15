@@ -88,9 +88,14 @@ if (isMainThread) {
       assert.deepEqual(result.schedules, setup.schedules);
       assert.deepEqual(result.categories, setup.categories);
       assert.deepEqual(result.categoryGroups, setup.categoryGroups);
+      assert.equal(result.normalizedScheduleCatalog.rulesVersion, 'schedules-1');
+      assert.deepEqual(result.normalizedScheduleCatalog.coverage, { complete: true });
+      assert.deepEqual(result.normalizedScheduleCatalog.schedules.map(row => row.id).sort(), setup.schedules.map(row => row.id).sort());
       assert.ok(result.fixtureRequests >= 3, 'real download, explicit sync and shutdown all use the protocol fixture');
       assert.equal(result.networkAttempts, 0);
     }
+    assert.deepEqual(protectedRead.normalizedScheduleCatalog.schedules, protectedRestart.normalizedScheduleCatalog.schedules);
+    assert.deepEqual(protectedRead.normalizedScheduleCatalog.schedules, protectedMutation.normalizedScheduleCatalog.schedules);
     assert.deepEqual(protectedMutation.mutation, { applied: true, categoryOnly: true, nullRestored: true, backupDecrypted: true });
     assert.equal(control.networkAttempts, 0);
     assert.equal(sourceHash(), originalHash, 'the shared package file stays byte-for-byte unchanged');
@@ -200,6 +205,7 @@ if (isMainThread) {
         const resolveSecret = async ref => { secretReads++; return ref === 'synthetic-key' ? '19'.repeat(32) : ''; };
         executor = new ActualExecutor({ api, config, resolveSecret });
         const snapshot = await executor.snapshot({ start: '2026-09-15', end: '2026-09-17' });
+        const normalizedScheduleCatalog = await executor.readSchedules();
         assert.deepEqual(snapshot.categories.map(row => row.id).sort(), workerData.categories.map(row => row.id).sort());
         assert.deepEqual(snapshot.categoryGroups.map(row => row.id).sort(), workerData.categoryGroups.map(row => row.id).sort());
         // The original SDK schedules work asynchronously after sync. Await the
@@ -226,7 +232,7 @@ if (isMainThread) {
           mutation = { applied: true, categoryOnly: true, nullRestored: true, backupDecrypted: true };
         }
         const transactions = await api.getTransactions(workerData.account, '2026-09-15', '2026-09-17');
-        const result = { ok: true, autoTransactions: transactions.filter(row => row.schedule === workerData.schedule).length, snapshotAutoTransactions: snapshot.transactions.filter(row => row.id !== workerData.simple).length, schedules: sorted(await api.getSchedules()), categories: sorted(await api.getCategories()), categoryGroups: sorted(await api.getCategoryGroups()), mutation };
+        const result = { ok: true, autoTransactions: transactions.filter(row => row.schedule === workerData.schedule).length, snapshotAutoTransactions: snapshot.transactions.filter(row => row.id !== workerData.simple).length, schedules: sorted(await api.getSchedules()), categories: sorted(await api.getCategories()), categoryGroups: sorted(await api.getCategoryGroups()), normalizedScheduleCatalog, mutation };
         await executor.close();
         const metadata = await metadataAfterClose(workerData.localId, workerData.guarded ? workerData.lastScheduleRun : '2026-09-16');
         const db = new Database(dbFile(), { readonly: true });

@@ -70,7 +70,7 @@ export async function runLoops({ config, store, handler, telegram, logger, sched
     let ticks = 0;
     while (!signal.aborted) {
       store.heartbeat();
-      if (ticks++ % 60 === 0) { store.prune(config.retentionDays); scheduler?.repository.prune(config.retentionDays); }
+      if (ticks++ % 60 === 0) { store.prune(config.retentionDays); scheduler?.prune(config.retentionDays); }
       await pause(60000);
     }
   };
