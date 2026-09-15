@@ -7,6 +7,7 @@ import { writeEncryptedBackup } from '../backups/encrypted.mjs';
 import { performance } from 'node:perf_hooks';
 import { normalizeSchedules } from './schedules.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
+import { readCategoryCatalog, validateCreateCategory, checkCreationAvailable, checkCreationGroup, categoryFingerprint, sameCategoryName } from './category.mjs';
 
 // Owns the SDK's global lifecycle. Production creates exactly one in its worker.
 // Tests inject an SDK-shaped fake; no model-facing arbitrary method dispatch exists.
@@ -115,6 +116,58 @@ export class ActualExecutor {
       const result = await inspectCurrent(api, this.config, targetId);
       return { ...result, syncedAt: new Date().toISOString() };
     });
+  }
+  inspectCategoryCatalog() {
+    return this.runExclusive(async api => {
+      try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); }
+      return { ...await readCategoryCatalog(api, this.config), syncedAt:new Date().toISOString() };
+    });
+  }
+  async createCategory(input) {
+    let args;
+    try { args = validateCreateCategory(input); } catch { return {status:'failed_before',code:'INPUT_INVALID'}; }
+    if (this.config.dryRun !== false) return {status:'failed_before',code:'MUTATION_DRY_RUN'};
+    if (args.context.householdId !== this.config.householdId || args.context.budgetId !== this.config.actual.budgetId) return {status:'failed_before',code:'MUTATION_CONFLICT'};
+    let attempted = false, backupRef, category;
+    try {
+      return await this.runExclusive(async api => {
+        const sync = async () => { try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); } };
+        await sync(); let catalog = await readCategoryCatalog(api,this.config); checkCreationAvailable(catalog,args);
+        let bytes;
+        try {
+          bytes = await api.exportBudget();
+          if (!(bytes instanceof Uint8Array) || bytes.length < 4 || Buffer.from(bytes.subarray(0,4)).toString('hex') !== '504b0304') throw new AppError('BACKUP_FAILED');
+          backupRef = await writeEncryptedBackup(bytes,{config:this.config,operationId:args.operationId,kind:'actual',resolveSecret:this.resolveSecret});
+        } catch { throw new AppError('BACKUP_FAILED'); } finally { bytes?.fill?.(0); }
+        await sync(); catalog = await readCategoryCatalog(api,this.config); checkCreationAvailable(catalog,args);
+        const existingIds = new Set(catalog.categories.map(row => row.id));
+        attempted = true;
+        // SDK 26.9.0 api/category-create accepts external group_id/is_income,
+        // generates its own ID, and offers no idempotency key. Never retry it.
+        const createdId = await api.createCategory({name:args.name,group_id:args.groupId,is_income:args.expectedGroup.isIncome,hidden:false});
+        if (!validId(createdId) || existingIds.has(createdId)) throw new AppError('MUTATION_UNCERTAIN');
+        const expected = {id:createdId,name:args.name,groupId:args.groupId,isIncome:args.expectedGroup.isIncome,hidden:false};
+        const waitForReadback = async () => {
+          const deadline = performance.now() + this.readbackTimeoutMs;
+          while (true) {
+            const current = await readCategoryCatalog(api,this.config); checkCreationGroup(current,args);
+            const matches = current.categories.filter(row => row.groupId === args.groupId && sameCategoryName(row.name,args.name));
+            const found = current.categories.find(row => row.id === createdId);
+            if (found) {
+              if (matches.length !== 1 || categoryFingerprint(args.context,found) !== categoryFingerprint(args.context,expected)) throw new AppError('MUTATION_UNCERTAIN');
+              category = found; return;
+            }
+            if (matches.length || performance.now() >= deadline) throw new AppError('MUTATION_UNCERTAIN');
+            await delay(Math.min(this.pollIntervalMs,Math.max(1,deadline-performance.now())));
+          }
+        };
+        await waitForReadback(); await sync(); await waitForReadback();
+        return {status:'applied',code:null,category,categoryFingerprint:categoryFingerprint(args.context,category),backupRef,verifiedAt:new Date().toISOString()};
+      });
+    } catch (error) {
+      if (attempted) this.broken = true;
+      return {status:attempted?'uncertain':'failed_before',code:attempted?'MUTATION_UNCERTAIN':errorCode(error,'ACTUAL_FAILED'),...(backupRef?{backupRef}:{}),...(category?{category}: {})};
+    }
   }
   async changeCategory(input) {
     let args;

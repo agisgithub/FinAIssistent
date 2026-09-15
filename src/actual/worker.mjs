@@ -17,6 +17,8 @@ parentPort.on('message', async message => {
     else if (message.operation === 'readSchedules') result = await executor.readSchedules();
     else if (message.operation === 'inspectTransaction') result = await executor.inspectTransaction(message.args);
     else if (message.operation === 'changeCategory') result = await executor.changeCategory(message.args);
+    else if (message.operation === 'inspectCategoryCatalog') result = await executor.inspectCategoryCatalog();
+    else if (message.operation === 'createCategory') result = await executor.createCategory(message.args);
     else if (message.operation === 'close') result = await executor.close();
     else throw new AppError('INPUT_INVALID');
     parentPort.postMessage({ id: message.id, result });

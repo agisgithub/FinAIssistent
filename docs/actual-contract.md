@@ -1,6 +1,12 @@
 # Contrato do adaptador Actual
 
-O adaptador usa `@actual-app/api` fixado em **26.9.0** (`package.json`). O dispatcher do worker aceita somente `snapshot`, `readSchedules`, `inspectTransaction`, `changeCategory` e `close` (`src/actual/worker.mjs`). A fila de `ActualClient` aguarda a terminação do worker vencido antes de permitir outro dono do mesmo cache; stdout/stderr do SDK não são encaminhados.
+O adaptador usa `@actual-app/api` fixado em **26.9.0** (`package.json`). O dispatcher do worker aceita somente `snapshot`, `readSchedules`, `inspectTransaction`, `inspectCategoryCatalog`, `changeCategory`, `createCategory` e `close` (`src/actual/worker.mjs`). A fila de `ActualClient` aguarda a terminação do worker vencido antes de permitir outro dono do mesmo cache; stdout/stderr do SDK não são encaminhados.
+
+## Criação confirmada de categoria
+
+`inspectCategoryCatalog()` retorna categorias e grupos normalizados após sync. `createCategory({operationId,name,groupId,expectedGroup,context})` permite criar somente uma categoria visível em grupo existente/visível; `expectedGroup` contém `id,name,isIncome,hidden:false`. O nome tem até 120 caracteres, sem controles/bidi. Duplicidade equivalente no mesmo grupo bloqueia antes do SDK. Não cria grupo, regra, lançamento ou pagamento.
+
+A execução exige `dryRun:false`, contexto correto, backup cifrado e revalidação do grupo/nome depois de sync. O SDK gera o ID; retorno `applied` exige categoria única com nome/grupo/tipo/visibilidade exatos, fingerprint, releitura e sync. Qualquer possibilidade de efeito sem prova suficiente retorna `uncertain` e aposenta o worker; a API não fornece idempotency key para repetir criação com segurança. `test/actual-category-create.test.mjs` cobre falhas e precondições; `test/sdk-category-create.test.mjs` usa o SDK fixado em orçamento sintético. As limitações de rede/concorrência dos testes continuam valendo.
 
 ## Proteção contra execução automática de agendas
 

@@ -6,7 +6,15 @@ Um orçamento, uma residência e um responsável são vinculados ao banco da apl
 
 Só são aceitas mensagens privadas do usuário configurado, com chat igual ao destino configurado. Bots, grupos, chats desconhecidos, mensagens encaminhadas e callbacks sem a identidade/chat esperados são recusados. Um update recusado guarda apenas ID, horário e indicador de autorização para poder avançar o cursor, sem conteúdo.
 
-Leituras são autorizadas pelo vínculo inicial; não pedem confirmação a cada uso. A única escrita no Actual altera a categoria de um lançamento simples, mediante proposta específica de uso único. Unidades, cadastros mensais e estados de ocorrências são alterações no SQLite local, também confirmadas por proposta. Não existe comando para chamar métodos SDK arbitrários, executar código, pagar, transferir ou criar regras no Actual. `/pago` registra somente uma declaração manual local. [Fluxo de recorrências](recurrences.md).
+Leituras são autorizadas pelo vínculo inicial; não pedem confirmação a cada uso. Escritas no Actual permitem mudar categoria de lançamentos simples e criar categoria em grupo existente, mediante proposta específica de uso único. A conversa pode preparar até dez mudanças e a criação opcional; não executa confirmação. Unidades, cadastros mensais e estados de ocorrências são alterações no SQLite local, também confirmadas por proposta. Não existe comando para chamar métodos SDK arbitrários, executar código, pagar, transferir ou criar regras no Actual. `/pago` registra somente uma declaração manual local. [Fluxo de recorrências](recurrences.md).
+
+Ollama é o provedor padrão da conversa. Gemini requer configuração explícita no servidor, chave por referência distinta dos demais segredos e confirmação de exportação do contexto limitado no Telegram. Autorizar Gemini não autoriza escrita financeira. Perguntas, histórico e resultados financeiros limitados podem sair do host; a política sem/com faturamento do projeto e os limites de retenção estão em [conversa e privacidade](conversation.md). Não se deve digitar credenciais no chat.
+
+## Propostas da conversa e lotes
+
+`prepare_category_changes` aceita IDs previamente observados, destinos reais e, opcionalmente, nome de categoria nova em grupo real. Ela prepara uma proposta; a aplicação mostra antes/depois e exige `/confirmar_lote` ou o botão autenticado, com prazo de 15 minutos. O modelo não possui ferramenta de confirmação. Campos arbitrários, valores/datas e criação de grupo ficam fora desse contrato.
+
+Cada item tem precondição e resultado próprio. Uma categoria criada ou itens aplicados permanecem se um item posterior falhar; o lote pode terminar `partial` ou `uncertain`. Não há rollback atômico do conjunto no Actual nem repetição automática de item incerto. `/lote ID` mostra o estado persistido; confira o orçamento antes de propor nova operação. A categorização individual e seu fluxo de desfazer continuam com as regras abaixo. Não há exclusão automática de categoria criada como compensação do lote.
 
 ## Propostas e confirmação de categoria
 
@@ -50,7 +58,7 @@ Os segredos são resolvidos dentro dos adaptadores. O SDK Actual fica isolado em
 
 ## Conteúdo e observabilidade
 
-Nomes de favorecido/conta e descrições são dados sem autoridade para executar ações. Snapshots e dados do Actual não vão ao modelo. Se Ollama estiver habilitado, ele recebe a pergunta atual e a data de referência para interpretar uma consulta de leitura; não se deve inserir credenciais na pergunta, e não há detector universal de segredos. `privacy.externalProviders` precisa ser `false`. Sem chaves, SDKs ou chamadas de Gemini, e-mail ou portais.
+Nomes de favorecido/conta e descrições são dados sem autoridade para executar ações. O classificador antigo recebe somente pergunta/data. A conversa com ferramentas recebe histórico limitado e resultados financeiros selecionados, inclusive nomes/notas/valores; não recebe o snapshot completo. Não insira credenciais no texto; não existe detector universal de segredos. `privacy.externalProviders` começa `false`; Gemini exige ativação com referência de chave própria e confirmação de contexto. E-mail e portais não são conectados. [Detalhes de dados e retenção](conversation.md).
 
 O logger registra somente evento permitido, horário, duração não negativa, integração permitida, código de erro e UUID interno validado. Não aceita objetos de erro, SQL, texto financeiro, URLs, tokens ou mensagens recebidas. A aplicação transforma erros externos em códigos antes de responder no Telegram.
 

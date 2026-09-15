@@ -1,5 +1,7 @@
 # Interpretação local de consultas — fase 1B
 
+Este documento descreve o classificador de intenção original. A [conversa com ferramentas](conversation.md) é uma interface separada: recebe histórico e resultados financeiros limitados, aceita Ollama e Gemini explícito, e pode preparar propostas sem confirmar sua execução. As restrições de payload abaixo pertencem a `OllamaIntentClient`.
+
 Comandos e consultas reconhecidas deterministicamente funcionam sem IA. O adaptador opcional `OllamaIntentClient` classifica somente a pergunta atual em uma intenção de leitura. Ele recebe texto limitado e a data de referência; não recebe histórico, snapshots, contas, lançamentos ou um resolvedor de segredos. Valores, saldos e demais resultados são calculados a partir do Actual pelo código financeiro.
 
 ## Contrato
@@ -22,7 +24,7 @@ São aceitos loopback, `localhost`, `host.docker.internal` e, somente com `allow
 
 Antes de enviar texto, toda interpretação consulta `GET /api/tags` e `POST /api/show`. Exige um modelo único instalado com tamanho/digest e metadados GGUF locais, capacidade `completion`, contexto suficiente, e ausência de `remote_model`/`remote_host`. Nomes cloud são recusados. O chat também é conferido contra redirecionamento remoto e modelo diferente. As chamadas de descoberta transportam apenas o nome do modelo.
 
-**Limite de confiança:** localhost sozinho não prova execução local. As verificações são defesa contra configuração equivocada; servidor malicioso, alias trocado entre descoberta e geração, proxy ou host comprometido continuam sendo fronteiras de confiança. A implantação deve desabilitar cloud no Ollama e restringir saída de rede conforme sua política. `localOnlyConfirmed` não é uma prova criptográfica de isolamento. Nenhum provedor externo/Gemini está implementado e `privacy.externalProviders` permanece `false`.
+**Limite de confiança:** localhost sozinho não prova execução local. As verificações são defesa contra configuração equivocada; servidor malicioso, alias trocado entre descoberta e geração, proxy ou host comprometido continuam sendo fronteiras de confiança. A implantação deve desabilitar cloud no Ollama e restringir saída de rede conforme sua política. `localOnlyConfirmed` não é uma prova criptográfica de isolamento. Este classificador continua exclusivamente local; habilitar Gemini no bloco separado não altera seu provedor. `privacy.externalProviders` é `false` por padrão e só pode ser ativado com Gemini configurado e seleção explícita na conversa.
 
 ## Limites e falhas
 

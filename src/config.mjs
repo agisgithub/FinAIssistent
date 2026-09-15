@@ -2,6 +2,7 @@ import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { badConfig as bad } from './config-diagnostics.mjs';
 import { validateOllamaConfig } from './llm/config.mjs';
+import { validateAssistantConfig, validateGeminiConfig } from './llm/chat-config.mjs';
 import { validateCategorizationConfig } from './categorization/recommend.mjs';
 
 function object(value, keys, field) {
@@ -11,12 +12,14 @@ function object(value, keys, field) {
 const ref = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value);
 const id = value => Number.isSafeInteger(value) && value > 0;
 export function validateConfig(input, baseDir = process.cwd()) {
-  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization'], 'config');
+  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization', 'assistant', 'gemini'], 'config');
   object(input.telegram, ['userId', 'chatId', 'tokenRef'], 'telegram');
   object(input.actual, ['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs'], 'actual');
   const privacy = input.privacy ?? { externalProviders: false };
   object(privacy, ['externalProviders'], 'privacy');
-  if (privacy.externalProviders !== false) bad('privacy.externalProviders', 'external_providers_disabled');
+  if (typeof privacy.externalProviders !== 'boolean') bad('privacy.externalProviders', 'expected_boolean');
+  const gemini = validateGeminiConfig(input.gemini), assistant = validateAssistantConfig(input.assistant);
+  if (privacy.externalProviders !== gemini.enabled) bad('privacy.externalProviders', 'external_provider_configuration_required');
   if (!ref(input.householdId)) bad('householdId', 'invalid_identifier');
   if (!id(input.telegram.userId)) bad('telegram.userId', 'expected_positive_integer');
   if (!id(input.telegram.chatId)) bad('telegram.chatId', 'expected_positive_integer');
@@ -42,6 +45,7 @@ export function validateConfig(input, baseDir = process.cwd()) {
   const backup = input.backup ?? {};
   object(backup, ['keyRef'], 'backup');
   if (backup.keyRef != null && !ref(backup.keyRef)) bad('backup.keyRef', 'invalid_secret_reference');
+  if (gemini.enabled && [input.telegram.tokenRef,input.actual.passwordRef,input.actual.encryptionPasswordRef,backup.keyRef].includes(gemini.apiKeyRef)) bad('gemini.apiKeyRef', 'secret_references_must_be_distinct');
   const retentionDays = input.retentionDays ?? 90;
   if (!Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 365) bad('retentionDays', 'integer_out_of_range');
   for (const [field, value] of [['dataDir', input.dataDir ?? './data'], ['secretDir', input.secretDir ?? './secrets']]) {
@@ -55,7 +59,8 @@ export function validateConfig(input, baseDir = process.cwd()) {
     householdId: input.householdId, timezone, currency, dataDir, secretDir, dryRun, retentionDays,
     telegram: Object.freeze({ ...input.telegram }),
     actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
-    privacy: Object.freeze({ externalProviders: false }),
+    privacy: Object.freeze({ externalProviders: privacy.externalProviders }),
+    assistant, gemini,
     backup: Object.freeze({ keyRef: backup.keyRef ?? null }),
     categorization: validateCategorizationConfig(input.categorization),
     ollama: validateOllamaConfig(input.ollama)

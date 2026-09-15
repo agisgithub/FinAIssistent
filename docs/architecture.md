@@ -22,11 +22,13 @@ Polling, consumo de trabalhos, saída de mensagens e manutenção têm loops sep
 ## Interfaces de extensão
 
 - `validateConfig(input, baseDir)` / `loadConfig(filename)`: configuração validada e congelada; erros públicos por código.
+- `ChatProviders(config,{fetchImpl,resolveSecret})`: HTTP nativo para Ollama/Gemini, `complete` e `listModels`, limites de corpo/contexto/prazo e metadados observados. Não executa ferramentas. Estado nativo com signatures/thinking permanece transitório e restrito ao mesmo provedor/modelo.
+- `ConversationService({config,store,actual,now,providers,financeTools})`: coordena histórico limitado, seleção de resultados, consentimento cloud e rodadas de ferramentas. `FinanceTools` expõe consultas fechadas e preparação de propostas; `AssistantActions` executa somente depois da confirmação autenticada. [Contrato, limites e aceite](conversation.md).
 - `secretResolver(root)(reference)`: resolve somente um nome de arquivo permitido dentro da raiz; não retorna caminhos em erros.
 - `identityFromConfig(config)`: `{householdId,budgetId,userId,chatId,timezone,currency}`. Toda requisição normalizada contém essa identidade.
 - `authorizeUpdate(update, config)`: mensagem `{type:'message',text,identity}`, callback `{type:'callback',callbackId,data,identity}` ou `null`.
 - `StateStore(filename, identity, {now})`: `acceptUpdate`, `enqueueJob`, `claimJob`, `completeJob`, `failJob`, `enqueueOutbox`, `claimOutbox`, `finishOutbox`, `recover`, preferências, snapshots, `backup`, `close`. `OperationJournal` usa `db` para propostas, operações, itens, exemplos e eventos. Transações são síncronas; rede fica fora delas.
-- `new ActualClient(config)`: `snapshot({start,end})`, `readSchedules()`, `inspectTransaction(targetId)`, `changeCategory(input)` e `close()`. São operações de domínio fechadas; nenhum método arbitrário do SDK é encaminhado. SDK e seus segredos ficam no worker; a aplicação recebe dados normalizados, códigos ou resultado de mutação.
+- `new ActualClient(config)`: `snapshot({start,end})`, `readSchedules()`, `inspectTransaction(targetId)`, `inspectCategoryCatalog()`, `changeCategory(input)`, `createCategory(input)` e `close()`. São operações de domínio fechadas; nenhum método arbitrário do SDK é encaminhado. SDK e seus segredos ficam no worker; a aplicação recebe dados normalizados, códigos ou resultado de mutação.
 - `createCommandHandler({config,store,actual,now,intentClient?,actionService?,billService?,reportScheduler?})`: retorna função `(request,job) => Promise<{text,replyMarkup?,dedupeKey?,metadata?}|null>`. Categorização e callbacks passam por `CategorizationActions`; recorrências e callbacks próprios passam por `BillService`; consultas seguem interpretação e cálculo locais.
 - `OperationJournal(store)`: cria propostas idempotentes por job, consome aprovação/reserva operação, registra conclusão com feedback/outbox e reconcilia observações sem repetir a escrita.
 - `BillService({config,store,actual,now})`: comandos locais, propostas, materialização de calendário, `refresh()` de evidências e `getUpcoming({from,to})`. `BillStore` persiste unidades, versões, atribuições, candidatos, ocorrências, observações, propostas e eventos.
@@ -64,6 +66,8 @@ A proposta dura 15 minutos e não escreve. Sua confirmação consome o nonce, re
 Conclusão da operação, feedback e mensagem final ficam no mesmo commit. Reconciliação somente relê: resultados originalmente incertos podem virar `observed_before` ou `observed_after`, mantendo `initial_outcome` e eventos de origem. Desfazer cria outra proposta para restaurar apenas a categoria anterior, com nova confirmação e guarda de fingerprint/linhagem. Detalhes de identidade, estados e retenção estão em [autorização](authorization.md).
 
 ## Estado e exclusividade
+
+A conversa usa memória limitada no SQLite (padrão até 24h/12 turnos, também limitada por bytes), seleção numerada e consentimentos por contexto. Pensamentos/assinaturas nativas não são histórico persistido. As propostas de lote têm journal separado e resultado por item: criação de categoria ou itens aplicados podem permanecer se outro item falhar. O commit local não torna o conjunto de RPCs Actual atômico. `/ia limpar` não apaga outbox, journal, backups ou mensagens já entregues.
 
 `state.sqlite` usa WAL, chaves estrangeiras e transações curtas. Inbox, cursor e job são gravados juntos. Conclusão e todas as partes da resposta são gravadas na mesma transação. Payloads têm limites de tamanho; metadados de deduplicação permanecem depois da retenção do conteúdo.
 

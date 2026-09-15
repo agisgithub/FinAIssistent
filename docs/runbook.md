@@ -4,6 +4,8 @@ Para preparar o servidor pela primeira vez ou corrigir `CONFIG_INVALID` após um
 
 ## Preparar o ambiente
 
+Para ajustar somente modelos e chave de IA, use `bash scripts/configure-ai.sh` no Docker/Linux ou `npm run setup:ai` com Node. O processo preserva as configurações Actual/Telegram/backup e override. A chave Gemini é digitada com entrada oculta; não passe como argumento, variável de ambiente ou mensagem Telegram. A configuração e a [política de exportação consciente de contexto](conversation.md) são separadas da confirmação financeira.
+
 1. Use Node.js 24 ou a imagem Docker deste repositório. Instale com `npm ci`; mantenha o lockfile. O SDK Actual está fixado em 26.9.0; valide a compatibilidade do servidor em um orçamento sintético antes de conectar o orçamento pessoal.
 2. Use bot, diretórios de dados, cache Actual e banco SQLite exclusivos desta aplicação. Não compartilhe o volume com outra cópia do bot nem com outro cliente SDK. Use filesystem local com locks de arquivo, não NFS.
 3. Copie e ajuste `config.example.json` para Node.js ou `config.docker.example.json` para Docker, somente se ainda não houver `config.json`. O `budgetId` é o **Sync ID**, não o nome exibido do orçamento. IDs do Telegram são números inteiros; o MVP requer conversa privada com `userId === chatId`.
@@ -64,6 +66,11 @@ O SDK 26.9.0 é carregado com uma transformação restrita em memória que imped
 | `BILL_NOT_FOUND` | Copie um ID exibido em `/unidades`, `/recorrencias` ou `/proximos_vencimentos` |
 | `BILL_CONFLICT` | O cadastro, ocorrência ou atribuição mudou; leia novamente e prepare outra proposta |
 | `BILL_EVIDENCE_STALE` | Releia catálogo/histórico e revise os IDs; suporte antigo não autoriza confirmar a proposta |
+| `CHAT_CONTEXT_LIMIT` | O corpo completo excedeu o contexto. Limpe histórico com `/ia limpar`, refine a consulta ou configure modelo com maior capacidade; não remova filtros para forçar resposta |
+| `OLLAMA_MODEL_UNSAFE` | Confira GGUF local, `tools`, contexto e cloud desativado; `/ia modelos` lista apenas os candidatos aprovados |
+| `GEMINI_REJECTED` / `GEMINI_RATE_LIMITED` | Confira chave de autorização, disponibilidade do modelo, projeto/billing/cotas no AI Studio; não existe fallback remoto nem retry automático |
+| `GEMINI_TIMEOUT` / `GEMINI_UNAVAILABLE` | Consulta não concluída. Pode ter consumido cota; tente novamente conscientemente ou escolha Ollama |
+| `CHAT_INVALID_RESPONSE` | Corpo inválido, resultado incompleto ou contrato incompatível; nenhuma ferramenta parcial foi aceita |
 | `PROPOSAL_EXPIRED` / `PROPOSAL_USED` / `PROPOSAL_POLICY_CHANGED` | Prepare outra proposta após conferir os dados e a configuração; não reutilize o código |
 
 Rotação do token do mesmo bot preserva o ID e o cursor. Para trocar de bot ou orçamento, use uma implantação com estado novo depois de revisar/exportar o histórico anterior; não há rebind implícito neste marco.

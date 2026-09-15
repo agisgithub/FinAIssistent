@@ -56,7 +56,8 @@ export async function preflight(filename) {
     ['telegram.tokenRef', config.telegram.tokenRef, value => /^\d+:[A-Za-z0-9_-]+$/.test(value)],
     ['actual.passwordRef', config.actual.passwordRef, () => true],
     ...(config.actual.encryptionPasswordRef ? [['actual.encryptionPasswordRef', config.actual.encryptionPasswordRef, () => true]] : []),
-    ...(config.backup.keyRef ? [['backup.keyRef', config.backup.keyRef, value => /^[a-fA-F0-9]{64}$/.test(value)]] : [])
+    ...(config.backup.keyRef ? [['backup.keyRef', config.backup.keyRef, value => /^[a-fA-F0-9]{64}$/.test(value)]] : []),
+    ...(config.gemini.enabled ? [['gemini.apiKeyRef', config.gemini.apiKeyRef, value => value.length <= 16384 && !/[\s\0]/.test(value)]] : [])
   ];
   if (!config.dryRun && !config.backup.keyRef) checks.push({ check: 'secret', field: 'backup.keyRef', status: 'failed', reason: 'backup_key_required_for_writes' });
   for (const [field, reference, validate] of references) {

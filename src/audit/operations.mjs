@@ -63,7 +63,10 @@ export class OperationJournal {
         VALUES (?,?,?,?,'reserved',?,?,?,?,?,?,?)`).run(operationId, identity.householdId, identity.budgetId, p.kind, now, now, p.id, job.id, p.policy_hash, p.dry_run, p.undo_of);
       this.db.prepare("INSERT INTO operation_items(operation_id,target_id,before_json,after_json,state,before_fingerprint,after_fingerprint) VALUES (?,?,?,?,'reserved',?,?)").run(operationId, p.target_id, p.before_json, p.after_json, p.before_fingerprint, p.after_fingerprint);
       this.db.prepare('UPDATE jobs SET safe_retry=0,updated_at=? WHERE id=?').run(now, job.id);
-      if (!p.dry_run) this.db.prepare('UPDATE category_examples SET active=0 WHERE household_id=? AND budget_id=? AND target_id=?').run(identity.householdId, identity.budgetId, p.target_id);
+      if (!p.dry_run) {
+        this.db.prepare('UPDATE category_examples SET active=0 WHERE household_id=? AND budget_id=? AND target_id=?').run(identity.householdId, identity.budgetId, p.target_id);
+        this.db.prepare("INSERT INTO operation_target_order(household_id,budget_id,target_id,operation_id,operation_kind) VALUES(?,?,?,?,'category')").run(identity.householdId,identity.budgetId,p.target_id,operationId);
+      }
       this.event(operationId, 'approval_consumed', { proposalId: p.id, policyHash: p.policy_hash, beforeFingerprint: p.before_fingerprint, afterFingerprint: p.after_fingerprint });
       this.store.enqueueOutbox(withActionMetadata({ text: `Aprovação recebida. Operação ${operationId} em processamento${p.dry_run ? ' (simulação)' : ''}. Aguarde a verificação do resultado.`, dedupeKey: `operation-start:${operationId}` }, { reason: 'approval_received' }));
       return { proposal: p, operationId };
@@ -116,7 +119,16 @@ export class OperationJournal {
     return decode(row);
   }
   operations() { return this.db.prepare('SELECT id,state,kind,created_at,error_code FROM operations WHERE household_id=? AND budget_id=? ORDER BY created_at DESC,rowid DESC').all(this.store.identity.householdId, this.store.identity.budgetId); }
-  latestTargetOperation(targetId) { return this.db.prepare(`SELECT o.id FROM operations o JOIN operation_items i ON i.operation_id=o.id WHERE i.target_id=? AND o.household_id=? AND o.budget_id=? AND o.state IN ('applied','uncertain','observed_after','observed_before','reserved','executing') ORDER BY o.created_at DESC,o.rowid DESC LIMIT 1`).get(targetId, this.store.identity.householdId, this.store.identity.budgetId); }
+  latestTargetOperation(targetId) {
+    const latest=this.db.prepare(`SELECT r.operation_id AS id FROM operation_target_order r
+      LEFT JOIN operations o ON r.operation_kind='category' AND o.id=r.operation_id
+      LEFT JOIN assistant_action_targets a ON r.operation_kind='assistant' AND a.operation_id=r.operation_id AND a.target_id=r.target_id
+      WHERE r.target_id=? AND r.household_id=? AND r.budget_id=? AND
+      ((o.dry_run=0 AND o.state IN ('applied','uncertain','observed_after','observed_before','reserved','executing')) OR a.state IN ('applied','uncertain','reserved','executing'))
+      ORDER BY r.sequence DESC LIMIT 1`).get(targetId,this.store.identity.householdId,this.store.identity.budgetId);
+    // Operations written before migration005 retain their original ordering.
+    return latest??this.db.prepare(`SELECT o.id FROM operations o JOIN operation_items i ON i.operation_id=o.id WHERE i.target_id=? AND o.household_id=? AND o.budget_id=? AND o.dry_run=0 AND o.state IN ('applied','uncertain','observed_after','observed_before','reserved','executing') ORDER BY o.created_at DESC,o.rowid DESC LIMIT 1`).get(targetId, this.store.identity.householdId, this.store.identity.budgetId);
+  }
   examples() { return this.db.prepare('SELECT * FROM category_examples WHERE household_id=? AND budget_id=? AND active=1').all(this.store.identity.householdId, this.store.identity.budgetId); }
   observe(operationId, fingerprint) {
     return this.store.transaction(() => {

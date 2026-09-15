@@ -24,7 +24,7 @@ Tenha estas informações em mãos:
 | Seu ID Telegram | Abra o chat privado do seu bot e envie `/start`; o assistente consulta os IDs disponíveis para você conferir |
 | Ollama | Opcional. Para a primeira prova, mantenha desligado; os comandos financeiros já funcionam |
 
-Token e senhas são digitados sem aparecer na tela. Quando houver uma configuração anterior, use Enter para manter o valor que o próprio assistente oferecer. Confira os dados e o resumo antes de autorizar a gravação. Gemini e OpenAI não precisam de chave neste MVP.
+Token e senhas são digitados sem aparecer na tela. Quando houver uma configuração anterior, use Enter para manter o valor que o próprio assistente oferecer. Confira os dados e o resumo antes de autorizar a gravação. Esse formulário inicial configura Actual/Telegram/Ollama; Gemini opcional usa o formulário separado `scripts/configure-ai.sh`.
 
 O assistente para **somente o bot** antes de configurar. A gravação depende de responder `s` em **Salvar esta configuração e os segredos?**; o padrão é não. Ele ajusta os arquivos para o UID 1000 da aplicação usando um container temporário de provisionamento e conserva os arquivos substituídos em `.setup-private/backups`. Essa cópia inclui configuração/segredos anteriores, não é um backup do orçamento ou do SQLite.
 
@@ -107,12 +107,12 @@ Use `sudo vi config.json` se o host não tiver Nano. No editor, preserve o JSON 
 | `actual.encryptionPasswordRef` | `null` se o orçamento não usa criptografia ponta a ponta; caso use, `actual-encryption-password` |
 | `backup.keyRef` | `null` para começar; veja o passo 8 antes de permitir escrita real |
 | `dryRun` | `true` durante a validação inicial |
-| `privacy.externalProviders` | `false` |
+| `privacy.externalProviders` | `false` por padrão; `true` somente junto de Gemini explicitamente configurado |
 | `ollama.enabled` | `false` durante a validação inicial |
 
 **Quais chaves são necessárias?** Para começar: token de um bot Telegram e senha de acesso ao servidor Actual. O Sync ID e seus IDs Telegram são identificadores, não chaves de API. No Actual, abra o orçamento → **Settings/Configurações → Show advanced settings/Mostrar configurações avançadas → Sync ID**. A senha de login do servidor e a senha de criptografia do orçamento são credenciais distintas. O SDK usa esses dados conforme a [documentação oficial do Actual](https://actualbudget.org/docs/api/#connecting-to-a-remote-server).
 
-Gemini e OpenAI não estão integrados neste MVP; não há chave deles para preencher. O uso básico funciona sem Ollama. Fontes locais: [exemplo Docker](../config.docker.example.json), [validação](../src/config.mjs) e [interpretação opcional](routing.md).
+O uso básico funciona sem modelo nem chave externa. Gemini opcional exige `gemini.enabled:true`, `apiKeyRef` para um arquivo privado distinto, `privacy.externalProviders:true` e seleção confirmada pelo chat. Não há integração OpenAI. Use o [formulário somente de IA e o aviso de contexto](conversation.md). Fontes locais: [exemplo Docker](../config.docker.example.json), [validação](../src/config.mjs) e [classificador local](routing.md).
 
 ## 3. Ligar o bot ao Actual que já existe
 
@@ -334,7 +334,7 @@ Para contas recorrentes, use o [guia de cadastro](recurrences.md#começar-pelo-t
 
 ### Ollama já instalado no mesmo servidor
 
-Ollama é opcional e não exige chave Gemini/OpenAI neste projeto. Depois que consultas explícitas funcionarem, siga [interpretação local e privacidade](routing.md#configuração). Confira o nome exato de um modelo local, desative recursos cloud no servidor e então configure `ollama.enabled`, `model` e `localOnlyConfirmed`.
+Ollama é opcional e não exige chave externa. Depois que consultas explícitas funcionarem, execute `bash scripts/configure-ai.sh` para configurar somente a IA, preservando Actual/Telegram/backup e override. O formulário lista modelos locais com ferramentas, propõe contexto conforme sua capacidade e oferece Gemini explicitamente com chave oculta. [Conversa e privacidade](conversation.md) explica comandos, termos Free/Paid e consentimento de contexto. O classificador antigo continua documentado em [interpretação local](routing.md#configuração).
 
 No Docker, `http://127.0.0.1:11434` alcança o próprio bot. Para o Ollama no host, use `http://host.docker.internal:11434` com o alias e a interface de escuta conferidos no passo 3; um IP literal da LAN requer `allowPrivateAddress: true`. O validador desta aplicação aceita somente os hosts locais/privados descritos em [routing.md](routing.md), não qualquer nome de serviço Docker. Não abra Ollama à internet. Reinicie o bot após ajustar o JSON e teste uma pergunta de leitura; cálculos financeiros continuam no código.
 

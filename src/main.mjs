@@ -28,7 +28,7 @@ export async function main({ config: injectedConfig, actual: injectedActual, tel
   try {
     const config = injectedConfig ?? await loadConfig();
     releaseLock = acquireLock(config.dataDir);
-    store = new StateStore(path.join(config.dataDir, 'state.sqlite'), identityFromConfig(config));
+    store = new StateStore(path.join(config.dataDir, 'state.sqlite'), identityFromConfig(config), { conversationConfig: config });
     store.recover();
     store.prune(config.retentionDays);
     const resolveSecret = secretResolver(config.secretDir);

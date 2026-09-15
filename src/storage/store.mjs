@@ -7,6 +7,8 @@ import { AppError, ERROR_CODES } from '../errors.mjs';
 import { badConfig } from '../config-diagnostics.mjs';
 import { recoverOperations, pruneOperations } from '../audit/operations.mjs';
 import { withActionMetadata } from '../categorization/response.mjs';
+import { recoverAssistantActions, pruneAssistantActions } from '../application/assistant-actions.mjs';
+import { pruneConversations } from '../conversation/store.mjs';
 
 const migrationsPath = fileURLToPath(new URL('../../migrations/', import.meta.url));
 const decode = row => row ? { ...row, payload: row.payload == null ? null : JSON.parse(row.payload) } : null;
@@ -36,9 +38,10 @@ export function splitMessage(text) {
 }
 
 export class StateStore {
-  constructor(filename, identity, { now = Date.now } = {}) {
+  constructor(filename, identity, { now = Date.now, conversationConfig = {} } = {}) {
     this.identity = Object.freeze({ ...identity });
     this.now = now;
+    this.conversationConfig = conversationConfig;
     if (filename !== ':memory:') {
       mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
       if (process.platform !== 'win32') chmodSync(path.dirname(filename), 0o700);
@@ -75,6 +78,7 @@ export class StateStore {
   }
   close() { this.db.close(); }
   transaction(fn) { return this.db.transaction(fn)(); }
+  splitMessage(text) { return splitMessage(text); }
   telegramEpochExpired() {
     const recorded = this.db.prepare("SELECT value FROM metadata WHERE key='telegram_last_received_at'").get()?.value;
     const last = recorded == null ? this.db.prepare('SELECT MAX(received_at) at FROM telegram_updates').get().at : Number(recorded);
@@ -190,6 +194,7 @@ export class StateStore {
       this.db.prepare("UPDATE jobs SET state=CASE WHEN safe_retry=1 THEN 'queued' ELSE 'uncertain' END,updated_at=? WHERE state='running'").run(this.now());
       this.db.prepare("UPDATE outbox SET state='uncertain',error_code='DELIVERY_UNCERTAIN',updated_at=? WHERE state='sending'").run(this.now());
       recoverOperations(this);
+      recoverAssistantActions(this);
     });
   }
   setPreference(key, value) { if (!keyValid(key)) throw new AppError('INPUT_INVALID'); this.db.prepare('INSERT INTO preferences VALUES (?,?,?) ON CONFLICT(household_id,key) DO UPDATE SET value=excluded.value').run(this.identity.householdId, key, serialized(value)); }
@@ -205,6 +210,8 @@ export class StateStore {
       uncertainDeliveries: this.db.prepare("SELECT COUNT(*) n FROM outbox WHERE state='uncertain'").get().n,
       uncertainOperations: this.db.prepare("SELECT COUNT(*) n FROM operations WHERE state='uncertain'").get().n,
       observedOperations: this.db.prepare("SELECT COUNT(*) n FROM operations WHERE state IN ('observed_after','observed_before')").get().n,
+      assistantUncertainOperations: this.db.prepare("SELECT COUNT(*) n FROM assistant_action_operations WHERE state='uncertain'").get().n,
+      assistantPartialOperations: this.db.prepare("SELECT COUNT(*) n FROM assistant_action_operations WHERE state='partial'").get().n,
       lastSnapshotAt: this.db.prepare('SELECT MAX(created_at) at FROM snapshots').get().at ?? null
     };
   }
@@ -215,6 +222,8 @@ export class StateStore {
       this.db.prepare("UPDATE outbox SET payload=NULL WHERE state='sent' AND updated_at<?").run(yesterday);
       this.db.prepare('DELETE FROM snapshots WHERE created_at<?').run(this.now() - retentionDays * 86400000);
       pruneOperations(this, retentionDays);
+      pruneAssistantActions(this, retentionDays);
+      pruneConversations(this, this.conversationConfig);
     });
   }
   heartbeat() { this.db.prepare("INSERT INTO metadata VALUES ('heartbeat_at',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(String(this.now())); }

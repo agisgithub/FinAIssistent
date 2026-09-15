@@ -9,6 +9,7 @@
     "start": "node src/main.mjs",
     "preflight": "node scripts/preflight.mjs",
     "telegram:info": "node scripts/telegram-info.mjs",
+    "setup:ai": "node scripts/configure-ai.mjs",
     "test": "node --test --test-isolation=none test/*.test.mjs",
     "test:sdk": "node --test --test-isolation=none test/sdk.test.mjs",
     "check": "node scripts/check.mjs"

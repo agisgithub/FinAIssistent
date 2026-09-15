@@ -12,6 +12,8 @@
     "encryptionPasswordRef": null
   },
   "privacy": { "externalProviders": false },
+  "assistant": { "enabled": true, "defaultProvider": "ollama", "historyTtlMinutes": 1440, "maxTurns": 12, "maxToolRounds": 4, "maxToolCalls": 8, "maxContextChars": 24000, "maxToolResultChars": 8000, "outputTokens": 1024 },
+  "gemini": { "enabled": false, "model": "gemini-3.8-flash", "apiKeyRef": null, "timeoutMs": 60000, "outputTokens": 4096 },
   "backup": { "keyRef": null },
   "categorization": { "rules": [] },
   "ollama": {
@@ -21,7 +23,7 @@
     "localOnlyConfirmed": false,
     "allowPrivateAddress": false,
     "timeoutMs": 30000,
-    "contextTokens": 8192,
+    "contextTokens": 32768,
     "outputTokens": 256
   },
   "dryRun": true

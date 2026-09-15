@@ -10,7 +10,10 @@ const fields = new Set([
   'categorization', 'categorization.rules', 'categorization.rules.id', 'categorization.rules.payeeId',
   'categorization.rules.accountId', 'categorization.rules.categoryId',
   'ollama', 'ollama.enabled', 'ollama.url', 'ollama.model', 'ollama.localOnlyConfirmed', 'ollama.allowPrivateAddress',
-  'ollama.timeoutMs', 'ollama.maxInputBytes', 'ollama.maxResponseBytes', 'ollama.contextTokens', 'ollama.outputTokens'
+  'ollama.timeoutMs', 'ollama.maxInputBytes', 'ollama.maxResponseBytes', 'ollama.contextTokens', 'ollama.outputTokens',
+  'assistant', 'assistant.enabled', 'assistant.defaultProvider', 'assistant.historyTtlMinutes', 'assistant.maxTurns',
+  'assistant.maxToolRounds', 'assistant.maxToolCalls', 'assistant.maxContextChars', 'assistant.maxToolResultChars', 'assistant.maxRequestBytes', 'assistant.outputTokens',
+  'gemini', 'gemini.enabled', 'gemini.model', 'gemini.apiKeyRef', 'gemini.timeoutMs', 'gemini.maxResponseBytes', 'gemini.outputTokens'
 ]);
 const reasons = new Set([
   'file_missing', 'file_unreadable', 'expected_file', 'file_too_large', 'invalid_json',
@@ -19,7 +22,7 @@ const reasons = new Set([
   'invalid_timezone', 'only_brl_supported', 'invalid_url', 'unsafe_url', 'integer_out_of_range',
   'expected_boolean', 'external_providers_disabled', 'invalid_path', 'directories_must_be_separate',
   'invalid_rules', 'local_confirmation_required', 'local_model_required', 'invalid_local_model', 'local_address_required',
-  'state_identity_mismatch', 'bot_identity_mismatch', 'invalid_bot_identity'
+  'state_identity_mismatch', 'bot_identity_mismatch', 'invalid_bot_identity', 'local_default_required', 'external_provider_configuration_required', 'secret_references_must_be_distinct'
 ]);
 const details = new WeakMap();
 export function badConfig(field, reason) {

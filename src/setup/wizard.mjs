@@ -51,6 +51,8 @@ function safeURL(value, fallback) {
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash ? url.toString().replace(/\/$/, '') : fallback; }
   catch { return fallback; }
 }
+// Reused by the AI-only form; it uses the same safe reads and commit protocol.
+export const setupFiles = { directory, regular, secretValue, yes, askValue };
 function prepareConfig(raw) {
   if (!isObject(raw) || !isObject(raw.telegram) || !isObject(raw.actual) || (raw.ollama != null && !isObject(raw.ollama))) fail('SETUP_CONFIG_STRUCTURE_INVALID');
   const config = structuredClone(raw);

@@ -4,9 +4,9 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-O MVP reúne as fases 0 a 1D e 2: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; Ollama opcional interpreta outras perguntas de leitura.
+O projeto reúne as fases 0 a 1D e 2, com conversa assistida: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; a conversa pode consultar ferramentas e preparar propostas, com Ollama como padrão e Gemini por escolha explícita.
 
-Unidades, recorrências e registros manuais de pagamento exigem confirmação no Telegram. Lembretes de datas cadastradas e consultas ao calendário funcionam mesmo sem Actual ou modelo disponíveis. E-mail, cofre, portais e Gemini ficam fora deste MVP; não há execução de pagamento bancário. [Escopo e provas](docs/scope.md).
+Unidades, recorrências e registros manuais de pagamento exigem confirmação no Telegram. Lembretes de datas cadastradas e consultas ao calendário funcionam mesmo sem Actual ou modelo disponíveis. E-mail, cofre e portais ficam fora deste marco; não há execução de pagamento bancário. [Escopo e provas](docs/scope.md).
 
 O carregamento do SDK inclui uma [proteção verificada para a versão fixada](docs/actual-contract.md#proteção-contra-execução-automática-de-agendas): consultas não acionam o serviço automático de agendas do Actual. Uma versão ou arquivo diferente bloqueia o adaptador até nova revisão; não atualize o SDK isoladamente.
 
@@ -18,7 +18,15 @@ No terminal Bash do servidor onde o projeto já está instalado, execute:
 cd ~/FinAIssistent && git pull --ff-only origin main && bash scripts/setup-docker.sh
 ```
 
-O [assistente de configuração](docs/docker-install.md#configuração-guiada) pergunta os dados necessários. Docker Engine e Compose precisam estar instalados; Actual e Ollama continuam nos serviços que você já utiliza. Não é necessária chave Gemini/OpenAI para este MVP. O [guia](docs/docker-install.md) também contém configuração manual, diagnóstico e testes pelo Telegram.
+O [assistente de configuração](docs/docker-install.md#configuração-guiada) pergunta os dados necessários. Docker Engine e Compose precisam estar instalados; Actual e Ollama continuam nos serviços que você já utiliza. Nenhuma chave externa é necessária para Ollama ou comandos locais. O [guia](docs/docker-install.md) também contém configuração manual, diagnóstico e testes pelo Telegram.
+
+Para configurar **somente a IA** em uma instalação existente, preservando Actual, Telegram, backup e override de rede:
+
+```bash
+bash scripts/configure-ai.sh
+```
+
+O formulário consulta modelos locais, ajusta o contexto e oferece Gemini opcional com chave oculta no servidor. No Telegram, `/ia` escolhe o provedor; `/ia gemini` e `/gemini pergunta` exigem confirmação de envio de contexto. Não envie chaves pelo Telegram. Veja [conversa, configuração e privacidade](docs/conversation.md).
 
 Se o build terminou, mas apareceu `startup_failed` com `CONFIG_INVALID`, comece pela [configuração e diagnóstico](docs/docker-install.md#o-que-significa-o-erro-apresentado). Um build bem-sucedido não comprova que `config.json` e os segredos estejam preenchidos.
 
@@ -45,6 +53,10 @@ Inicie somente se o pré-teste passar. Ele verifica configuração, segredos e a
 | Comando | Resultado neste marco |
 | --- | --- |
 | `/status` | Estado local, última leitura e contagem de entregas/operações incertas |
+| `/ia`, `/ia ollama`, `/ia gemini` | Provedor da conversa; Gemini exige aviso e confirmação de contexto |
+| `/ia modelos`, `/ia modelo ID`, `/ia limpar` | Modelos disponíveis, escolha e limpeza da memória ativa |
+| `/gemini pergunta` | Pergunta remota única, após confirmação; conserva o provedor padrão |
+| `/lote [ID]`, `/confirmar_lote CÓDIGO`, `/cancelar_lote CÓDIGO` | Estado ou confirmação de proposta financeira preparada pela conversa |
 | `/relatorio` | Relatório imediato com saldos, dia/mês, orçamento, incomuns e ações; não ativa a agenda |
 | `/preferencias` | Consulta e configura diário, alertas, fuso da agenda, dias, hora, detalhe e limites |
 | `/contas` | Saldos até o fim do período, com rótulos de conta fora do orçamento, encerrada e incluída/excluída |
@@ -80,7 +92,7 @@ Um snapshot incompleto não produz totais. Se o Actual ficar indisponível, some
 
 `/gastos com Mercado | ultimos 6 meses` filtra a categoria pelo nome do catálogo. Se houver categorias homônimas, a resposta pede uma escolha por grupo; não soma destinos ambíguos. Perguntas sobre uma nova parcela ou um plano de economia pedem os dados necessários e não aprovam crédito ou decisões de gasto.
 
-Ollama fica desligado no exemplo. Consulte a [configuração local e privacidade](docs/routing.md) antes de habilitar um modelo. A IA recebe apenas a pergunta e a data de referência; valores, IDs e cálculos vêm do código e do Actual. O modelo não participa da confirmação nem recebe snapshots para categorizar.
+Ollama fica desligado no exemplo até escolher um modelo instalado. O classificador antigo recebe apenas pergunta/data; a conversa nova recebe histórico limitado e resultados paginados de ferramentas, incluindo dados financeiros. Ela não recebe o snapshot inteiro nem os arquivos de segredos como contexto. Cálculos e IDs vêm do código e do Actual; o modelo não confirma alterações. Gemini nunca é fallback automático. [Configuração e privacidade da conversa](docs/conversation.md).
 
 ## Categorização e recuperação
 
@@ -92,7 +104,7 @@ Antes do patch, a aplicação persiste a aprovação e o registro da operação,
 
 `/reconciliar` distingue `observed_before` e `observed_after`: são estados observados agora, sem prova de quem executou a alteração. `observed_after` permite preparar uma nova proposta `/desfazer`, inclusive para restaurar categoria nula. Uma aplicação já verificada conserva seu resultado histórico mesmo que uma leitura posterior encontre edição externa. Desfazer exige o fingerprint posterior ainda igual e a operação mais recente do alvo; não restaura outros campos. O SDK não fornece compare-and-swap entre clientes: edições externas concorrentes, inclusive ciclos A→B→A, continuam um limite. Veja [autorização](docs/authorization.md) e [contrato Actual](docs/actual-contract.md).
 
-As sugestões seguem regras explícitas locais, exemplos confirmados ativos e histórico de até 12 meses, nessa ordem. Não há aplicação automática nem criação de regras no Actual. O escore mede evidência, não probabilidade. Confiança alta exige regra sem conflito ou ao menos cinco exemplos únicos em acordo sem conflito; 5/5 pode ser alta, 9/10 fica conservadoramente média. O modelo local não sugere categorias nesta fase. Exemplo de regra configurada, com IDs reais escolhidos pelo operador:
+As sugestões de `/sugerir` seguem regras explícitas locais, exemplos confirmados ativos e histórico de até 12 meses, nessa ordem. Não há aplicação automática nem criação de regras no Actual. O escore mede evidência, não probabilidade. Confiança alta exige regra sem conflito ou ao menos cinco exemplos únicos em acordo sem conflito; 5/5 pode ser alta, 9/10 fica conservadoramente média. Separadamente, a conversa pode consultar categorias reais e preparar uma proposta de até dez alterações ou criar categoria em grupo existente; toda execução exige confirmação. Lotes podem concluir parcialmente; itens incertos não são repetidos. Exemplo de regra configurada, com IDs reais escolhidos pelo operador:
 
 ```json
 "categorization": {

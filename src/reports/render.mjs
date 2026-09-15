@@ -85,7 +85,7 @@ export function renderQuery(result) {
     body = `Saldos até ${displayDate(metadata.period.end)}\n\n` + (listing.items.map(account => `• ${label(account.name)} — ${moneyOrUnknown(account.balance)}\n${account.offBudget ? 'Fora do orçamento' : 'No orçamento'} · ${account.closed ? 'encerrada' : 'aberta'} · ${selected.has(account.id) ? 'incluída' : 'excluída'} nos cálculos.\nID: ${actionId(account.id)}`).join('\n\n') || 'Nenhuma conta.');
   } else if (kind === 'uncategorized') {
     const accounts = new Map(analysis.accounts.map(account => [account.id, account.name]));
-    body = `${analysis.uncategorized.length} lançamentos sem categoria\n\n` + (listing.items.map(row => `• ${displayDate(row.date)} — ${formatMoney(row.amount)}\nFavorecido ${label(analysis.payees.get(row.payeeId)?.name ?? 'não informado')}\nConta ${label(accounts.get(row.accountId) ?? 'não informada')}\nID: ${actionId(row.id)}${row.parentId ? '\nParte de um lançamento dividido; edição somente no Actual.' : ''}`).join('\n\n') || 'Nenhum lançamento sem categoria neste escopo.');
+    body = `${analysis.uncategorized.length} lançamentos sem categoria\n\n` + (listing.items.map((row, index) => `${index + 1}. ${displayDate(row.date)} — ${formatMoney(row.amount)}\nFavorecido ${label(analysis.payees.get(row.payeeId)?.name ?? 'não informado')}\nConta ${label(accounts.get(row.accountId) ?? 'não informada')}\nID: ${actionId(row.id)}${row.parentId ? '\nParte de um lançamento dividido; edição somente no Actual.' : ''}`).join('\n\n') || 'Nenhum lançamento sem categoria neste escopo.');
   } else if (kind === 'budget') {
     body = [
       'Fatos do Actual — orçamento mensal:',

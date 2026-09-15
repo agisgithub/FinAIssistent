@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { AppError } from '../errors.mjs';
 import { validatePeriod } from './snapshot.mjs';
 import { validateChange, validId } from './transaction.mjs';
+import { validateCreateCategory } from './category.mjs';
+const writes = new Set(['changeCategory','createCategory']);
 
 // Only domain operations cross this boundary; never forward SDK method names.
 export class ActualClient {
@@ -41,7 +43,7 @@ export class ActualClient {
       if (!request || state.stopping || message?.id !== request.id) return;
       state.active = null;
       clearTimeout(request.timer);
-      if (request.operation === 'changeCategory' && message.result?.status === 'uncertain') {
+      if (writes.has(request.operation) && message.result?.status === 'uncertain') {
         // The SDK may still be applying an unawaited update after its domain
         // readback deadline. Retire this owner before releasing the queue,
         // retaining the journal/backup evidence from the uncertain result.
@@ -67,7 +69,7 @@ export class ActualClient {
       if (this.#state === state) this.#state = null;
       // Rejection happens AFTER termination, so the next queued lifecycle can
       // never open the same SDK cache while an expired worker still owns it.
-      if (request?.operation === 'changeCategory') request.resolve({ status: 'uncertain', code: 'MUTATION_UNCERTAIN' });
+      if (writes.has(request?.operation)) request.resolve({ status: 'uncertain', code: 'MUTATION_UNCERTAIN' });
       else request?.reject(new AppError(code));
     });
     return state.stopping;
@@ -118,6 +120,19 @@ export class ActualClient {
     const task = this.#tail.then(() => this.#request('changeCategory', args)).catch(() => ({ status: 'uncertain', code: 'MUTATION_UNCERTAIN' }));
     this.#tail = task.catch(() => {});
     return task;
+  }
+  inspectCategoryCatalog() {
+    if (this.#closing) return Promise.reject(new AppError('SHUTTING_DOWN'));
+    const task = this.#tail.then(() => this.#request('inspectCategoryCatalog'));
+    this.#tail = task.catch(() => {}); return task;
+  }
+  createCategory(input) {
+    let args;
+    try { args=validateCreateCategory(input); } catch { return Promise.resolve({status:'failed_before',code:'INPUT_INVALID'}); }
+    if (this.#closing) return Promise.resolve({status:'failed_before',code:'SHUTTING_DOWN'});
+    if (this.#config.dryRun !== false) return Promise.resolve({status:'failed_before',code:'MUTATION_DRY_RUN'});
+    const task=this.#tail.then(() => this.#request('createCategory',args)).catch(() => ({status:'uncertain',code:'MUTATION_UNCERTAIN'}));
+    this.#tail=task.catch(() => {}); return task;
   }
 
   close() {

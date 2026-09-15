@@ -2,7 +2,7 @@
 
 Projeto novo. Baseline: Node.js 24, ESM, `@actual-app/api` 26.9.0 e `better-sqlite3` 12.11.1. Um responsável, uma residência, um orçamento e BRL.
 
-O escopo do MVP reúne as fases 1A–1D e 2. As provas abaixo são testes locais reproduzíveis, com integrações simuladas e orçamento SDK descartável. A aprovação de CI pertence ao commit publicado; esta matriz não declara que um commit ainda não publicado passou no CI.
+O escopo reúne as fases 1A–1D e 2 e a extensão de conversa com ferramentas. As provas abaixo são testes locais reproduzíveis, com integrações simuladas e orçamento SDK descartável. A aprovação de CI pertence ao commit publicado; esta matriz não declara que um commit ainda não publicado passou no CI.
 
 ## Mapa de requisitos
 
@@ -30,7 +30,13 @@ O escopo do MVP reúne as fases 1A–1D e 2. As provas abaixo são testes locais
 | Lembretes offline e variação | `bills.test.mjs`: opt-in, DST/restart, cancelamento/429, limites AND, histerese e fonte atual | 2 |
 | Aceite pelo fluxo público Telegram | `mvp-bills-acceptance.test.mjs`: ingresso, handler, jobs/outbox e SQLite em disco; unidade/conta confirmadas, Actual/LLM indisponíveis, aviso sem duplicar e pago/reabrir confirmados | 2 |
 
-Gemini é uma fase opcional separada. E-mail, cofre, portais e automação de escrita financeira sem confirmação são posteriores. O executor não aceita pagamentos bancários, transferências, exportação pelo chat nem métodos arbitrários.
+Gemini é opcional e desativado por padrão; seu uso depende de configuração no servidor e confirmação de contexto no Telegram, sem fallback remoto. A conversa pode ler ferramentas fechadas e preparar categoria/lote confirmado; não chama métodos arbitrários nem confirma propostas. E-mail, cofre, portais, execução de pagamentos/transferências e escrita sem confirmação permanecem fora do escopo. [Arquitetura e critérios de conversa](conversation.md).
+
+| Extensão | Prova local |
+| --- | --- |
+| Provedores sem SDK extra, tool calls e limites | `chat-providers.test.mjs`: HTTP simulado, assinaturas/IDs, bloqueio remoto, contexto, corpo, prazo e canários |
+| Configuração somente de IA | `setup-ai.test.mjs`: preservação de Actual/Telegram/backup/override, entrada oculta, cancelamento e rollback; Bash validado no Linux |
+| Sessão, consentimento e propostas | `conversation.test.mjs`, `assistant-tools.test.mjs`, `actual-category-create.test.mjs` e `sdk-category-create.test.mjs`; limites e cenários estão em [conversation.md](conversation.md#propostas-e-critérios-de-aceite) |
 
 ## Consultas e categorização
 
