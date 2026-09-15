@@ -54,7 +54,7 @@ Nomes de favorecido/conta e descrições são dados sem autoridade para executar
 
 O logger registra somente evento permitido, horário, duração não negativa, integração permitida, código de erro e UUID interno validado. Não aceita objetos de erro, SQL, texto financeiro, URLs, tokens ou mensagens recebidas. A aplicação transforma erros externos em códigos antes de responder no Telegram.
 
-Respostas de categorização, confirmações, avisos persistidos e resultados têm um único rodapé com provedor determinístico, motivo, tempo e uso de IA. O tempo é medido quando a execução atual permite; mensagens reconstruídas após reinício, avisos sem medição e erros recuperados informam `desconhecido`. A categorização usa `Uso de IA: nenhum`, sem inventar contagens de tokens. Um erro da operação aparece por código no rodapé. O resultado final já é persistido com esse rodapé e usa a mesma mensagem no retorno, preservando a deduplicação.
+Respostas de categorização, confirmações, avisos e resultados conservam provedor determinístico, motivo, duração, falha e `usage: null` nos metadados internos da resposta. Duração ausente permanece `null`; não se inventam tempo nem contagens de tokens. O texto não recebe um rodapé técnico repetido. Erros relevantes continuam identificados por código permitido, e as propostas mantêm os dados necessários à confirmação. O resultado final é persistido com o texto destinado ao usuário e reutilizado no retorno, preservando a deduplicação.
 
 SQLite, snapshots, propostas, journal e outbox contêm dados financeiros e precisam de disco/volume protegido. O banco ativo não é cifrado pelo aplicativo; os [backups da escrita são cifrados](backups.md). O journal é separado do logger técnico, mas não é imutável contra um administrador da máquina.
 

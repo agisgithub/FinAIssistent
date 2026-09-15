@@ -12,11 +12,11 @@ O orçamento é o envelope mensal completo do Actual, de todas as contas, podend
 
 ## Conteúdo e apresentação
 
-O modo `summary` usa totais/contagens, até três itens por lista e nomes abreviados, com comandos para os detalhes. O teste de tamanho inclui nomes longos, três anomalias e três vencimentos, reservando 400 caracteres para o rodapé da integração e mantendo a resposta em até 3900 caracteres. Nenhum valor monetário é abreviado e os totais usam todos os lançamentos elegíveis. O modo `detailed` exibe até dez itens e explica os cálculos; o envio usa a divisão de mensagens da outbox.
+O modo `summary` usa totais/contagens, até três itens por lista e nomes abreviados, com comandos para os detalhes. O teste de tamanho inclui nomes longos, três anomalias e três vencimentos, mantendo a resposta em até 3900 caracteres. Nenhum valor monetário é abreviado e os totais usam todos os lançamentos elegíveis. O modo `detailed` exibe até dez itens e explica os cálculos; o envio usa a divisão de mensagens da outbox.
 
-Ambos incluem saldos, receitas/despesas do dia, despesas acumuladas no mês, comparação de orçamento, categorias sinalizadas, limites de saldo, gastos incomuns, lançamentos sem categoria, vencimentos quando disponíveis e ações de revisão. O texto compacto identifica a fonte/snapshot/sync/escopo; o objeto `metadata` preserva os períodos completos, contas incluídas/excluídas, fuso, versão financeira e `reportRulesVersion: 'daily-1'`.
+Ambos incluem saldos, receitas/despesas do dia, despesas acumuladas no mês, comparação de orçamento, categorias sinalizadas, limites de saldo, gastos incomuns, lançamentos sem categoria, vencimentos quando disponíveis e ações de revisão. Títulos e linhas em branco separam as seções. O texto identifica fonte Actual, atualização, cobertura e escopo, com datas legíveis. O objeto `metadata` preserva os IDs de snapshot/orçamento, períodos completos, contas incluídas/excluídas, fuso, versão financeira e `reportRulesVersion: 'daily-1'`.
 
-O domínio não consulta IA nem grava estado. Retorna `provider: 'deterministic'`, motivo, duração medida e `usage: null`. A integração acrescenta o rodapé de provedor, motivo, tempo, falha/fallback e uso ao texto antes de persistir a entrega.
+O domínio não consulta IA nem grava estado. Retorna `provider: 'deterministic'`, motivo, duração medida e `usage: null`. Esses campos continuam nos metadados internos; a integração não acrescenta um rodapé técnico em cada entrega. Avisos de dados desatualizados, informações incompletas e códigos de falha continuam visíveis quando aplicáveis.
 
 ## Limiares compartilhados
 

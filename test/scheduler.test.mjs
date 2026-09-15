@@ -74,7 +74,7 @@ test('DST fold delivery, preference edits and reenable never duplicate a reserve
 test('scheduled timezone is separate from financial date at month boundary',async t=>{
   const f=fixture(t,{at:'2026-08-31T12:00:00Z'});f.enableDaily({timezone:'Asia/Tokyo',time:'08:00'});
   f.at('2026-08-31T23:05:00Z');f.scheduler.tick();await f.run();
-  const row=f.store.db.prepare('SELECT * FROM report_occurrences').get();assert.equal(row.slot_key,'2026-09-01');assert.equal(row.report_date,'2026-08-31');assert.equal(f.lastOptions.reportDate,'2026-08-31');assert.match(f.outbox()[0].payload.text,/data financeira 2026-08-31/);
+  const row=f.store.db.prepare('SELECT * FROM report_occurrences').get();assert.equal(row.slot_key,'2026-09-01');assert.equal(row.report_date,'2026-08-31');assert.equal(f.lastOptions.reportDate,'2026-08-31');assert.match(f.outbox()[0].payload.text,/Data financeira: 31\/08\/2026/);
 });
 
 test('restart coalesces old queued work before consumer RPC and keeps only latest missed daily occurrence',async t=>{
@@ -120,7 +120,7 @@ test('alert hysteresis notifies activation/escalation/reentry with stable episod
   f.candidates=[candidate('critical')];await f.scan();assert.equal(f.outbox().length,3);
   f.candidates=[candidate('none',{warning:true,critical:true})];await f.scan();f.candidates=[candidate('warning')];await f.scan();
   assert.equal(f.outbox().length,4);assert.equal(f.store.db.prepare('SELECT episode FROM alert_state').get().episode,2);
-  assert.match(f.outbox().at(-1).payload.text,/Fonte: Actual; snapshot/);assert.match(f.outbox().at(-1).payload.text,/sincronizado/);
+  assert.match(f.outbox().at(-1).payload.text,/Fonte: Actual · sincronizado em/);assert.doesNotMatch(f.outbox().at(-1).payload.text,/snapshot|fuso financeiro/);
 });
 
 test('resolved or escalated pending/rate-limited alert is cancelled before send; uncertain history is preserved',async t=>{
@@ -176,7 +176,7 @@ test('preferences and manual report commands use no model; account typos do not 
   assert.match((await handler(request('/preferencias'))).text,/desativado/);
   assert.match((await handler(request('/preferencias saldo typo 10000'))).text,/não encontrada/);assert.equal(f.scheduler.preferences.get().thresholds.lowBalances.length,0);
   await handler(request('/preferencias saldo checking 10000'));assert.equal(f.scheduler.preferences.get().thresholds.lowBalances[0].accountId,'checking');
-  const report=await handler(request('/relatorio'));assert.match(report.text,/Actual/);assert.match(report.text,/Provedor: regras locais/);assert.equal(f.scheduler.preferences.get().dailyEnabled,false);assert.equal(f.outbox().length,0);
+  const report=await handler(request('/relatorio'));assert.match(report.text,/Actual/);assert.doesNotMatch(report.text,/Provedor:|Tempo:/);assert.equal(report.metadata.provider,'deterministic');assert.equal(f.scheduler.preferences.get().dailyEnabled,false);assert.equal(f.outbox().length,0);
 });
 
 test('runtime recognizes scheduled jobs and does not issue an error after their durable completion',async t=>{

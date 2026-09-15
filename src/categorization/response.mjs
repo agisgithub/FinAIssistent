@@ -17,12 +17,13 @@ const reasons = Object.freeze({
 });
 
 // This wrapper is used before durable enqueue as well as at the action boundary.
-// Metadata is an internal marker, so untrusted text cannot suppress the footer.
+// Metadata remains an internal marker. Successful deterministic responses need
+// no diagnostic footer; a real failure retains its allowlisted code in the text.
 export function withActionMetadata(message, { reason = 'category_command', durationMs = null, failure = null } = {}) {
   if (message.metadata?.provider === 'deterministic' && Object.hasOwn(reasons, message.metadata.reason)) return message;
   const safeReason = Object.hasOwn(reasons, reason) ? reason : 'category_command';
   const duration = Number.isSafeInteger(durationMs) && durationMs >= 0 ? durationMs : null;
   const code = failure == null ? null : ERROR_CODES.has(failure) ? failure : 'INTERNAL_ERROR';
   const metadata = { provider: 'deterministic', reason: safeReason, durationMs: duration, failure: code, usage: null };
-  return { ...message, text: `${message.text}\n\nProvedor: regras locais (sem IA). Motivo: ${reasons[safeReason]}. Tempo: ${duration === null ? 'desconhecido' : `${duration} ms`}. Falha: ${code ?? 'nenhuma'}. Fallback: não necessário. Uso de IA: nenhum.`, metadata };
+  return { ...message, text: message.text + (code ? `\n\nFalha: ${code}.` : ''), metadata };
 }

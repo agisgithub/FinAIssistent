@@ -3,7 +3,7 @@ import { localToday, normalizeText } from '../finance/periods.mjs';
 import { DEFAULT_SCOPE, validateScope } from '../finance/analyze.mjs';
 import { parseQuery } from '../application/dispatch.mjs';
 import { executeQuery } from '../application/queries.mjs';
-import { renderQuery, renderScope, renderInterpretation } from '../reports/render.mjs';
+import { renderQuery, renderScope, renderInterpretation, displayTime } from '../reports/render.mjs';
 import { OllamaIntentClient } from '../llm/ollama.mjs';
 import { CategorizationActions } from '../application/actions.mjs';
 import { ReportScheduler } from '../jobs/scheduler.mjs';
@@ -15,7 +15,7 @@ const HELP = 'Consultas: /status, /contas, /resumo, /gastos hoje|mes, /comparar,
 export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = new OllamaIntentClient(config), actionService = new CategorizationActions({ config, store, actual, now }), billService = new BillService({ config, store, actual, now }), reportScheduler = new ReportScheduler({ config, store, actual, now: () => now().getTime(), upcomingProvider: options => billService.getUpcoming(options) }) }) {
   return async (request, job) => {
     const startedAt = performance.now();
-    const answer = (text, metadata = { provider: 'deterministic', reason: 'deterministic_parser', durationMs: Math.max(0, Math.round(performance.now() - startedAt)) }) => ({ text: `${text}\n\n${renderInterpretation(metadata)}`, metadata });
+    const answer = (text, metadata = { provider: 'deterministic', reason: 'deterministic_parser', durationMs: Math.max(0, Math.round(performance.now() - startedAt)) }) => ({ text: [text, renderInterpretation(metadata)].filter(Boolean).join('\n\n'), metadata });
     store.assertIdentity(request.identity);
     const billResult = await billService.handle(request,job);
     if (billResult) return billResult;
@@ -33,8 +33,17 @@ export function createCommandHandler({ config, store, actual, now = () => new Da
     if (command === '/status') {
       const state = store.status();
       const preferences = reportScheduler.preferences.get(), reports = reportScheduler.repository.status();
-      const lastReport = row => row ? `${new Date(row.scheduled_at).toISOString()} (${row.state}${row.data_state ? `; ${row.data_state}` : ''}${row.error_code ? `; código ${row.error_code}` : ''})` : 'nenhuma ocorrência';
-      return answer(`FinAIssistent em execução.\nOrçamento vinculado. Modo: ${config.dryRun ? 'simulação' : 'operação'}.\nFila: ${state.queued}. Entregas incertas: ${state.uncertainDeliveries}. Operações incertas: ${state.uncertainOperations}. Reconciliadas por observação: ${state.observedOperations}.\nÚltima leitura: ${state.lastSnapshotAt ? new Date(state.lastSnapshotAt).toISOString() : 'ainda não realizada'}.\nDiário ${preferences.dailyEnabled ? 'ativado' : 'desativado'}; último: ${lastReport(reports.daily)}.\nAlertas ${preferences.alertsEnabled ? 'ativados' : 'desativados'}; última varredura: ${lastReport(reports.alerts)}. Estado da ocorrência não comprova entrega no Telegram.`);
+      const states = { pending: 'aguardando execução', completed: 'concluída', unavailable: 'indisponível', cancelled: 'cancelada' };
+      const lastReport = row => row ? `${displayTime(row.scheduled_at, config.timezone)} · ${states[row.state] ?? 'pendente de verificação'}${row.data_state === 'stale' ? ' · dados desatualizados' : row.data_state === 'incomplete' ? ' · leitura incompleta' : ''}${row.error_code ? ` · código ${row.error_code}` : ''}` : 'ainda não executado';
+      return answer([
+        'FINAISSISTENT · EM EXECUÇÃO',
+        `Modo: ${config.dryRun ? 'simulação no Actual' : 'escrita no Actual com confirmação'}.\nOrçamento vinculado.`,
+        `Última leitura\n${state.lastSnapshotAt ? displayTime(state.lastSnapshotAt, config.timezone) : 'Ainda não realizada.'}`,
+        `Pendências\nFila: ${state.queued}\nEntregas incertas: ${state.uncertainDeliveries}\nOperações incertas: ${state.uncertainOperations}${state.observedOperations ? `\nReconciliadas por observação: ${state.observedOperations}` : ''}${state.uncertainOperations ? '\nConfira /operacoes antes de repetir uma alteração.' : ''}`,
+        `Relatório diário: ${preferences.dailyEnabled ? 'ativado' : 'desativado'}\nÚltima ocorrência agendada: ${lastReport(reports.daily)}`,
+        `Alertas: ${preferences.alertsEnabled ? 'ativados' : 'desativados'}\nÚltima ocorrência agendada: ${lastReport(reports.alerts)}`,
+        'Execução concluída não comprova entrega no Telegram.'
+      ].join('\n\n'));
     }
     if (command === '/escopo') {
       const choices = { padrao: DEFAULT_SCOPE, encerradas: { includeOffBudget: false, includeClosed: true }, fora_orcamento: { includeOffBudget: true, includeClosed: false }, todas: { includeOffBudget: true, includeClosed: true } };

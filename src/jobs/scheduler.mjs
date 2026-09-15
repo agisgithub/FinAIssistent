@@ -4,7 +4,7 @@ import { buildDailyReport,dailyReportPeriod } from '../reports/daily.mjs';
 import { identityFromConfig } from '../policy/authorize.mjs';
 import { DEFAULT_SCOPE,validateScope } from '../finance/analyze.mjs';
 import { localToday } from '../finance/periods.mjs';
-import { label } from '../reports/render.mjs';
+import { label,displayDate,displayTime } from '../reports/render.mjs';
 import { withActionMetadata } from '../categorization/response.mjs';
 import { latestDailyOccurrence } from './civil-time.mjs';
 import { ReportStore } from './report-store.mjs';
@@ -76,7 +76,7 @@ export class ReportScheduler {
     return this.buildReport(snapshot,{reportDate,today:localToday(this.config.timezone,new Date(this.now())),scope,dataState,detail:prefs.detail,thresholds:prefs.thresholds,identity:this.identity,trackedAlerts:this.repository.trackedAlerts(snapshot),upcoming});
   }
   unavailable(reportDate,dataState,code,durationMs) {
-    return withActionMetadata({text:`Relatório de ${reportDate} indisponível: ${dataState==='incomplete'?'leitura incompleta':'Actual indisponível e sem snapshot compatível'}. Nenhum total foi calculado. Código: ${code}.`},{reason:'daily_report',durationMs,failure:code});
+    return withActionMetadata({text:`Relatório de ${displayDate(reportDate)} indisponível: ${dataState==='incomplete'?'leitura incompleta':'Actual indisponível e sem snapshot compatível'}. Nenhum total foi calculado. Código: ${code}.`},{reason:'daily_report',durationMs,failure:code});
   }
   async runJob(job) {
     this.tick();
@@ -94,9 +94,9 @@ export class ReportScheduler {
       this.repository.complete(job,occurrence,{state:'unavailable',dataState:read.dataState,scope,code:read.code,messages:occurrence.kind==='daily'?[this.unavailable(occurrence.report_date,read.dataState,read.code,duration())]:[]}); return;
     }
     const report=this.render(read.snapshot,{reportDate:occurrence.report_date,scope,dataState:read.dataState,prefs});
-    const message=withActionMetadata({text:`Relatório solicitado para ${new Date(occurrence.scheduled_at).toISOString()}; data financeira ${occurrence.report_date}.\n${report.text}`},{reason:'daily_report',durationMs:duration(),failure:read.code});
+    const message=withActionMetadata({text:`Agendado para ${displayTime(occurrence.scheduled_at,this.config.timezone)}.\nData financeira: ${displayDate(occurrence.report_date)}.\n\n${report.text}`},{reason:'daily_report',durationMs:duration(),failure:read.code});
     this.repository.complete(job,occurrence,{state:read.dataState==='fresh'?'completed':'unavailable',snapshotId:read.snapshot.id,dataState:read.dataState,scope,code:read.code,
-      messages:occurrence.kind==='daily'?[message]:[],candidates:occurrence.kind==='alerts'&&read.dataState==='fresh'?report.alertCandidates.map(c=>({...c,text:`${c.text}\nFonte: Actual; snapshot ${label(read.snapshot.id,128)}; sincronizado ${label(read.snapshot.syncedAt)}; fuso financeiro ${label(this.config.timezone)}; competência ${label(c.competence)}.`})):null,durationMs:duration()});
+      messages:occurrence.kind==='daily'?[message]:[],candidates:occurrence.kind==='alerts'&&read.dataState==='fresh'?report.alertCandidates.map(c=>({...c,text:`${c.text}\n\nFonte: Actual · sincronizado em ${displayTime(read.snapshot.syncedAt,this.config.timezone)}.\nCompetência: ${label(c.competence)}.`})):null,durationMs:duration()});
     } catch (error) {
       if (this.store.db.prepare('SELECT state FROM jobs WHERE id=?').get(job.id)?.state==='done') return;
       const code=errorCode(error); this.tick();

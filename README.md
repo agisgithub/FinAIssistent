@@ -120,7 +120,7 @@ O exemplo de saldo configura R$ 100,00 para um ID real copiado de `/contas`; o c
 
 O diário usa os dias/horário/fuso escolhidos. Alertas verificam condições a cada 15 minutos, todos os dias, e avisam entrada ou aumento de severidade; a margem de saída evita repetição perto do limite. A data financeira vem do instante agendado no fuso do orçamento. No reinício, cada rotina considera apenas sua última ocorrência perdida, sem enviar as anteriores nem datas anteriores à ativação. Alterar detalhe ou limites não repete um diário já reservado.
 
-Os relatórios tentam reler 12 meses do Actual e identificam snapshot, sincronização e escopo. A falta de leitura completa não atualiza nem resolve alertas financeiros. Um relatório diário/manual pode mostrar cache estritamente compatível, marcado como desatualizado. A seção de vencimentos recebe o calendário local; `/proximos_vencimentos` continua disponível quando faltam dados para um relatório financeiro. `dryRun` protege alterações no Actual e permite relatórios e alertas explicitamente ativados. Veja [agenda e recuperação](docs/scheduling.md) e [regras dos relatórios](docs/reporting.md).
+Os relatórios tentam reler 12 meses do Actual. As mensagens organizam valores, datas, atualização e escopo em seções curtas; identificadores de leitura e métricas técnicas permanecem nos metadados internos. A falta de leitura completa não atualiza nem resolve alertas financeiros. Um relatório diário/manual pode mostrar cache estritamente compatível, marcado como desatualizado. A seção de vencimentos recebe o calendário local; `/proximos_vencimentos` continua disponível quando faltam dados para um relatório financeiro. `dryRun` protege alterações no Actual e permite relatórios e alertas explicitamente ativados. Veja [agenda e recuperação](docs/scheduling.md) e [regras dos relatórios](docs/reporting.md).
 
 ## Recorrências por unidade
 
@@ -142,15 +142,21 @@ Três meses consecutivos de histórico com unidade/IDs resolvidos podem gerar um
 
 ## Exemplo fictício verificável
 
-O fixture em `test/fixtures/financial.mjs` contém compra de cartão, pagamento entre contas, split, estorno, reversão de receita e contas excluídas. Nos testes, `/resumo 2026-09-01 2026-09-15` produz:
+O fixture em `test/fixtures/financial.mjs` contém compra de cartão, pagamento entre contas, split, estorno, reversão de receita e contas excluídas. Com esses dados fictícios, `/resumo 2026-09-01 2026-09-15` começa assim:
 
 ```text
-Despesas brutas: R$ 340,00.
-Estornos identificados: R$ 20,00.
+RESUMO FINANCEIRO
+01/09/2026 a 15/09/2026
+
 Despesas líquidas: R$ 320,00.
-Receitas categorizadas: R$ 1.000,00; reversões: R$ 10,00; líquidas: R$ 990,00.
-Entradas sem classificação suficiente: R$ 50,00.
+Receitas líquidas: R$ 990,00.
 Movimento líquido elegível: R$ 720,00.
+
+Detalhes do período
+Despesas brutas: R$ 340,00.
+Estornos identificados: R$ 20,00 (entradas em categorias de despesa).
+Receitas categorizadas: R$ 1.000,00; reversões: R$ 10,00.
+Entradas sem classificação suficiente: R$ 50,00.
 ```
 
 `Quanto gastei hoje?` e `resumo nos últimos seis meses` dispensam o modelo. `/orcamento` preserva o carryover booleano informado pelo Actual e identifica separadamente as diferenças calculadas a partir de saldo/alocação. Os exemplos rodam sem credenciais reais:

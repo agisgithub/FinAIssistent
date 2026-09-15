@@ -104,7 +104,7 @@ test('MVP Telegram acceptance: confirmed local bill survives Actual outage, rest
   const unitProposal = await command('/unidade cadastrar nome="Apartamento fictício"');
   assert.match(await command('/unidades'), /Nenhuma unidade/);
   assert.match(await confirm(proposalNonce(unitProposal)), /Alteração LOCAL confirmada/);
-  const units = await command('/unidades'), unitId = /^([A-Za-z0-9_-]+):/m.exec(units)?.[1];
+  const units = await command('/unidades'), unitId = /^ID: ([A-Za-z0-9_-]+)$/m.exec(units)?.[1];
   assert.ok(unitId); assert.match(units, /Apartamento fictício/);
 
   assert.match(await command('/contas'), /account_mvp/);

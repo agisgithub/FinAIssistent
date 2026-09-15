@@ -33,7 +33,7 @@ export async function executeQuery(input, { config, store, actual, today }) {
   catch (error) {
     const code = errorCode(error);
     const previous = ['ACTUAL_FAILED', 'ACTUAL_SYNC_FAILED', 'ACTUAL_TIMEOUT', 'NETWORK_FAILED'].includes(code) ? latestCompatibleSnapshot(store, config, intent, scope) : null;
-    if (!previous) return { kind: intent.kind, unavailable: true, code, period: intent.period, lastSnapshotAt: store.latestSnapshot()?.syncedAt ?? null };
+    if (!previous) return { kind: intent.kind, unavailable: true, code, period: intent.period, timezone: config.timezone, lastSnapshotAt: store.latestSnapshot()?.syncedAt ?? null };
     snapshot = previous; dataState = 'stale';
   }
   if (snapshot.householdId !== config.householdId || snapshot.budgetId !== config.actual.budgetId || snapshot.timezone !== config.timezone || snapshot.currency !== config.currency) throw new AppError('UNAUTHORIZED');
@@ -45,7 +45,7 @@ export async function executeQuery(input, { config, store, actual, today }) {
   if (selection && !selection.category) {
     return { kind: intent.kind, intent, categoryChoice: selection.reason, requestedCategory: intent.categoryName,
       listing: pageItems(selection.options, intent.page), categoryGroups: snapshot.categoryGroups ?? [],
-      snapshotId: snapshot.id, budgetId: snapshot.budgetId, period: intent.period, syncedAt: snapshot.syncedAt, dataState };
+      snapshotId: snapshot.id, budgetId: snapshot.budgetId, period: intent.period, timezone: snapshot.timezone, syncedAt: snapshot.syncedAt, dataState };
   }
   const analysis = analyzeSnapshot(snapshot, { period: intent.period, scope, today, categoryId: selection?.category.id ?? null });
   if (dataState === 'fresh') store.saveSnapshot({ ...snapshot, queryScope: scope });

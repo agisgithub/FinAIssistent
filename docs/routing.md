@@ -8,7 +8,7 @@ Comandos e consultas reconhecidas deterministicamente funcionam sem IA. O adapta
 
 Planejamento de parcela/financiamento ou economia usa `{kind:'needs_info',topic:'installment'|'savings'}`, sem valores ou períodos; o chamador pede os dados necessários, sem afirmar viabilidade. Para escrita, pedido fora do escopo ou interpretação insuficiente, o schema permite `{kind:'unsupported'}` sem campos adicionais; o chamador explica o limite sem consultar o Actual. Campos extras, IDs, valores monetários, métodos SDK, ferramentas e ações são recusados. A validação local continua obrigatória mesmo com JSON Schema no modelo.
 
-Metadados retornados: provedor `ollama`, nome de modelo selecionado, motivo `local_intent`, duração em milissegundos e contagem observada de tokens de entrada/saída/total. Ausência ou contador inválido vira `null`, não zero. Metadados não contêm a pergunta nem a resposta bruta. O logger geral continua com sua lista permitida; não registra automaticamente esses objetos.
+Metadados retornados: provedor `ollama`, nome de modelo selecionado, motivo `local_intent`, duração em milissegundos e contagem observada de tokens de entrada/saída/total. Ausência ou contador inválido vira `null`, não zero. No Telegram, uma linha curta informa quando o Ollama foi usado e qual modelo foi selecionado; duração e contagens permanecem nos metadados. Falhas de interpretação mostram o código e mantêm disponíveis os comandos explícitos. Metadados não contêm a pergunta nem a resposta bruta. O logger geral continua com sua lista permitida; não registra automaticamente esses objetos.
 
 ## Configuração
 

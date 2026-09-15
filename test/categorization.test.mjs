@@ -70,7 +70,7 @@ test('proposal is case preserving, specific, opaque and replay idempotent before
   const f = fixture(t), request = f.request('/categorizar TxCaseSensitive Food'), job = f.job(request);
   const first = await f.actions.handle(request, job), replay = await f.actions.handle(request, job);
   assert.deepEqual(replay.replyMarkup, first.replyMarkup);
-  assert.equal(replay.text.split('\n\nProvedor:')[0], first.text.split('\n\nProvedor:')[0]);
+  assert.equal(replay.text, first.text);
   assert.equal(f.inspections, 1); assert.equal(f.patches, 0); assert.equal(f.backups, 0);
   assert.match(first.text, /32,50/); assert.match(first.text, /Mercado fictício/); assert.match(first.text, /"sem categoria" → "Alimentação"/);
   for (const button of first.replyMarkup.inline_keyboard[0]) { assert.ok(Buffer.byteLength(button.callback_data) <= 64); assert.doesNotMatch(button.callback_data, /Food|TxCaseSensitive/); }
@@ -371,40 +371,40 @@ test('same-name categories remain distinguishable in exact confirmation and reco
   assert.match((await f.run('/sugerir TxCaseSensitive')).text, /grupo "Cotidiano"/);
 });
 
-test('every action response has one deterministic footer with measured duration and no model use', async t => {
+test('action responses keep measured deterministic metadata without diagnostic footers', async t => {
   const f = fixture(t, { rules: [{ id: 'r', payeeId: 'Payee', categoryId: 'Food' }] });
   const messages = [await f.run('/categorias'), await f.run('/sugerir TxCaseSensitive')];
   const first = await f.propose(); messages.push(first.result, await f.run(`/cancelar ${first.proposal.nonce}`));
   const second = await f.propose(), confirmed = await f.confirm(second.proposal);
   messages.push(second.result, confirmed.result, await f.run('/operacoes'), await f.run(`/operacoes ${confirmed.operation.id}`), await f.run(`/reconciliar ${confirmed.operation.id}`), await f.run(`/desfazer ${confirmed.operation.id}`));
   for (const message of messages) {
-    assert.equal((message.text.match(/Provedor:/g) ?? []).length, 1); assert.equal(message.metadata.provider, 'deterministic');
+    assert.doesNotMatch(message.text, /Provedor:|Tempo:|Uso de IA:|Falha: nenhuma/); assert.equal(message.metadata.provider, 'deterministic');
     assert.ok(Number.isSafeInteger(message.metadata.durationMs) && message.metadata.durationMs >= 0);
-    assert.match(message.text, /Motivo: .+\. Tempo: \d+ ms\./); assert.match(message.text, /Uso de IA: nenhum/); assert.equal(message.metadata.usage, null);
+    assert.ok(message.metadata.reason); assert.equal(message.metadata.usage, null);
     assert.deepEqual(withActionMetadata(message, { durationMs: 999 }), message);
   }
 });
 
-test('durable acknowledgment and terminal footer preserve exact message/dedupe, including failure metadata', async t => {
+test('durable acknowledgment and terminal response preserve exact message/dedupe and visible failure code', async t => {
   const f = fixture(t, { backupFailure: true }), { proposal } = await f.propose(), job = f.job();
   const response = await f.actions.confirm(proposal.nonce, { identity: f.identity, job });
   const op = f.actions.journal.operations()[0];
   const ack = JSON.parse(f.store.db.prepare('SELECT payload FROM outbox WHERE dedupe_key=?').get(`operation-start:${op.id}`).payload).text;
-  assert.match(ack, /Provedor: regras locais/); assert.match(ack, /Tempo: desconhecido/); assert.match(ack, /Uso de IA: nenhum/);
+  assert.doesNotMatch(ack, /Provedor:|Tempo:|Uso de IA:/); assert.ok(ack.length > 0);
   const finalText = JSON.parse(f.store.db.prepare('SELECT payload FROM outbox WHERE dedupe_key=?').get(`operation-result:${op.id}:0`).payload).text;
   assert.equal(finalText, response.text); assert.match(finalText, /Falha: BACKUP_FAILED/); assert.doesNotMatch(finalText, /Falha: nenhuma/);
   f.store.completeJob(job.id, response);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM outbox WHERE dedupe_key=?').get(`operation-result:${op.id}:0`).n, 1);
-  assert.equal((finalText.match(/Provedor:/g) ?? []).length, 1);
+  assert.doesNotMatch(finalText, /Provedor:/);
 });
 
-test('restart and sanitized job errors disclose unknown elapsed time instead of fabricated timing', async t => {
+test('restart and sanitized job errors retain uncertainty and failure codes without timing boilerplate', async t => {
   const f = fixture(t), { proposal } = await f.propose(), job = f.job();
   const { operationId } = f.actions.journal.reserve(proposal.nonce, { identity: f.identity, job, config: f.config });
   f.store.recover();
   const recovery = JSON.parse(f.store.db.prepare('SELECT payload FROM outbox WHERE dedupe_key=?').get(`operation-result:${operationId}:0`).payload).text;
-  assert.match(recovery, /recuperação do registro após reinício/); assert.match(recovery, /Tempo: desconhecido/); assert.match(recovery, /Falha: MUTATION_UNCERTAIN/);
+  assert.match(recovery, /Falha: MUTATION_UNCERTAIN/); assert.doesNotMatch(recovery, /Provedor:|Tempo:/);
   const rejectedJob = f.job(); f.store.failJob(rejectedJob, 'SECRET_CANARY');
   const error = JSON.parse(f.store.db.prepare('SELECT payload FROM outbox WHERE dedupe_key=?').get(`job-error:${rejectedJob.id}`).payload).text;
-  assert.match(error, /Provedor: regras locais/); assert.match(error, /Tempo: desconhecido/); assert.match(error, /Falha: INTERNAL_ERROR/); assert.doesNotMatch(error, /SECRET_CANARY/);
+  assert.match(error, /Falha: INTERNAL_ERROR/); assert.doesNotMatch(error, /SECRET_CANARY|Provedor:|Tempo:/);
 });

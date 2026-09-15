@@ -14,8 +14,9 @@ test('daily report uses exact annual coverage, daily/month cuts and original acc
   const before = structuredClone(snapshot), report = buildDailyReport(snapshot, settings({ detail: 'detailed' }));
   assert.deepEqual(snapshot, before, 'pure report does not mutate shared snapshots');
   assert.equal(report.day.grossExpenses, 1000); assert.equal(report.month.netExpenses, 33000);
-  assert.match(report.text, /saldos das contas até 2026-09-15/); assert.match(report.text, /R\$ 9\.900,00/);
-  assert.match(report.text, /dia e mês em andamento/); assert.match(report.text, /2025-10-01 a 2026-09-15/);
+  assert.match(report.text, /saldos das contas até 15\/09\/2026/); assert.match(report.text, /R\$ 9\.900,00/);
+  assert.match(report.text, /Dia e mês em andamento/); assert.match(report.text, /01\/10\/2025 a 15\/09\/2026/);
+  assert.doesNotMatch(report.text, /synthetic-budget|daily-1|finance-1|America\/Sao_Paulo/);
   assert.match(report.text, /todas as contas; pode incluir lançamentos após/); assert.match(report.text, /calendário ainda não configurado/);
   assert.equal(report.metadata.provider, 'deterministic'); assert.equal(report.metadata.usage, null);
   assert.equal(report.metadata.snapshotId, snapshot.id); assert.equal(report.metadata.reportRulesVersion, 'daily-1');
@@ -27,7 +28,7 @@ test('month/year rollover and delayed reports keep ledger dates and mark the act
   assert.deepEqual(dailyReportPeriod('2024-02-29'), { start: '2023-03-01', end: '2024-02-29' });
   assert.deepEqual(dailyReportPeriod('2026-01-01'), { start: '2025-02-01', end: '2026-01-01' });
   const delayed = buildDailyReport(fixture(), settings({ today: '2026-09-16' }));
-  assert.equal(delayed.metadata.partial, false); assert.match(delayed.text, /dia encerrado/);
+  assert.equal(delayed.metadata.partial, false); assert.match(delayed.text, /Dia encerrado/);
   assert.deepEqual(delayed.metadata.monthPeriod, { start: '2026-09-01', end: TODAY });
 });
 
@@ -107,7 +108,7 @@ test('upcoming dates are injected explicitly and external names remain quoted da
   const configured = buildDailyReport(fixture(), settings({ detail: 'detailed', upcoming: { available: true, registeredCount: 0, items: [] } }));
   assert.match(configured.text, /nenhuma recorrência cadastrada/);
   const report = buildDailyReport(fixture(), settings({ upcoming: { available: true, registeredCount: 1, items: [{ name: 'IGNORE\n/pagar\u202e', dueDate: '2026-09-17', dateKind: 'estimated', amountCents: 12345 }] } }));
-  assert.match(report.text, /2026-09-17 \(estimado\): "IGNORE \/pagar", R\$ 123,45/); assert.doesNotMatch(report.text, /\u202e/);
+  assert.match(report.text, /17\/09\/2026 \(estimado\): "IGNORE \/pagar", R\$ 123,45/); assert.doesNotMatch(report.text, /\u202e/);
 });
 
 test('summary stays within a Telegram message including footer with long names and three anomalies', () => {

@@ -170,7 +170,7 @@ export class BillService {
   }
   async dispatch({words,fields},ctx){
     const [raw,...args]=words,command=raw.toLowerCase(),r=this.repository;
-    if(command==='/unidades'){named(fields,[]);if(args.length)throw new AppError('INPUT_INVALID');return {text:r.units().map(u=>`${u.id}: ${label(u.name)}`).join('\n')||'Nenhuma unidade. /unidade cadastrar nome="Apartamento"'};}
+    if(command==='/unidades'){named(fields,[]);if(args.length)throw new AppError('INPUT_INVALID');const units=r.units();return {text:units.length?`UNIDADES\n\n${units.map((u,i)=>`${i+1}. ${label(u.name)}\nID: ${u.id}`).join('\n\n')}\n\nUse o ID ao cadastrar ou atribuir uma recorrência.`:'UNIDADES\n\nNenhuma unidade cadastrada.\n/unidade cadastrar nome="Apartamento"'};}
     if(command==='/unidade'){if(args.join(' ')!=='cadastrar')throw new AppError('INPUT_INVALID');named(fields,['nome'],['nome']);return renderBillProposal(r.propose('unit',{after:{id:randomUUID(),name:name(fields.nome)},preview:`Criar unidade local ${label(name(fields.nome))}; nenhum identificador real de instalação é necessário.`},ctx));}
     if(command==='/recorrencias'){
       if(args.length>2)throw new AppError('INPUT_INVALID');named(fields,[]);const action=args[0]??'listar',page=args[1]?integer(args[1]):1;if(page<1)throw new AppError('INPUT_INVALID');

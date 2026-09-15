@@ -19,7 +19,7 @@ test('robust anomaly uses prior comparable IDs, median/MAD floor and identifiabl
   const result = run(fixture()), found = result.anomalies.findings[0];
   assert.equal(found.targetId, 'target'); assert.equal(found.sampleSize, 8); assert.equal(found.medianCents, 1000); assert.equal(found.madCents, 0); assert.equal(found.thresholdCents, 6000);
   assert.equal(anomaly(result).severity, 'warning'); assert.match(found.text, /2026-09-15.*Loja fictícia.*Conta fictícia.*R\$ 120,00/);
-  assert.match(result.text, /2026-08-17 a 2026-09-15/);
+  assert.match(result.text, /17\/08\/2026 a 15\/09\/2026/);
   assert.match(run(fixture(), { detail: 'detailed' }).text, /Desvio absoluto mediano \(MAD\)/);
 });
 

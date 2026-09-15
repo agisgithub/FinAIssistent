@@ -1,14 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { memoryStore } from './helpers.mjs';
+import { memoryStore, update } from './helpers.mjs';
 import { financialSnapshot, TODAY, PERIOD } from './fixtures/financial.mjs';
 import { executeQuery } from '../src/application/queries.mjs';
 import { createCommandHandler } from '../src/telegram/commands.mjs';
-import { renderQuery } from '../src/reports/render.mjs';
+import { renderQuery, displayDate, displayTime } from '../src/reports/render.mjs';
 import { AppError } from '../src/errors.mjs';
 import { TelegramClient } from '../src/telegram/client.mjs';
 import { parseQuery } from '../src/application/dispatch.mjs';
 import { comparisonPeriods } from '../src/finance/periods.mjs';
+import { acceptTelegramUpdate } from '../src/telegram/ingress.mjs';
+import { processOneJob, processOneDelivery } from '../src/jobs/runtime.mjs';
 
 const query = (kind = 'summary', page = 1, period = PERIOD) => ({ kind, period, page });
 const setup = t => {
@@ -24,8 +26,11 @@ test('complete query/render pipeline produces fixture totals with source, timezo
   assert.match(text, /Despesas brutas: R\$ 340,00/); assert.match(text, /Despesas líquidas: R\$ 320,00/);
   assert.match(text, /Receitas categorizadas: R\$ 1\.000,00; reversões: R\$ 10,00/);
   assert.match(text, /Entradas sem classificação suficiente: R\$ 50,00/);
-  assert.match(text, /Snapshot:/); assert.match(text, /America\/Sao_Paulo/); assert.match(text, /2026-09-01 a 2026-09-15/);
-  assert.match(text, /finance-1/); assert.match(text, /Dia atual em andamento/);
+  assert.match(text, /^RESUMO FINANCEIRO\n01\/09\/2026 a 15\/09\/2026\n\nDespesas líquidas:/);
+  assert.match(text, /Fonte: Actual/); assert.match(text, /15\/09\/2026 às 09:00 \(UTC-3\)/);
+  assert.doesNotMatch(text, /Snapshot:|synthetic-budget|finance-1|America\/Sao_Paulo/); assert.match(text, /Dia atual em andamento/);
+  assert.ok(result.analysis.metadata.snapshotId); assert.equal(result.analysis.metadata.rulesVersion, 'finance-1');
+  assert.equal(result.analysis.metadata.timezone, 'America/Sao_Paulo');
   assert.equal(result.analysis.metadata.dataState, 'fresh');
   assert.deepEqual(dependencies.store.latestSnapshot().queryScope, { includeClosed: false, includeOffBudget: false });
 });
@@ -66,7 +71,7 @@ test('six-month natural query is deterministic and Ollama failure leaves command
   const request = text => ({ type: 'message', text, identity: dependencies.identity });
   const answer = await handler(request('resumo nos últimos seis meses'));
   assert.deepEqual(dependencies.calls[0], { start: '2026-04-01', end: TODAY }); assert.equal(modelCalls, 0);
-  assert.match(answer.text, /Provedor: regras locais/); assert.match(answer.text, /Uso de IA: nenhum/);
+  assert.doesNotMatch(answer.text, /Provedor:|Tempo:|Uso de IA:|Falha: nenhuma/); assert.equal(answer.metadata.provider, 'deterministic');
   assert.match((await handler(request('explique minha situação financeira com detalhes'))).text, /OLLAMA_UNAVAILABLE/);
   assert.match((await handler(request('/gastos mes'))).text, /R\$ 320,00/); assert.equal(modelCalls, 1);
 });
@@ -74,7 +79,8 @@ test('Ollama only selects a validated read intent; its numeric metadata cannot s
   const dependencies = setup(t); const metadata = { provider: 'ollama', model: 'fixture', reason: 'local_intent', durationMs: 42, usage: { inputTokens: 100, outputTokens: 20, totalTokens: 120 } };
   const handler = createCommandHandler({ ...dependencies, now: () => new Date('2026-09-15T12:00:00Z'), intentClient: { interpret: async () => ({ intent: query('spending'), metadata }) } });
   const answer = await handler({ type: 'message', text: 'me informe o consumo do período atual', identity: dependencies.identity });
-  assert.match(answer.text, /Despesas líquidas: R\$ 320,00/); assert.match(answer.text, /42 ms/); assert.match(answer.text, /100\/20\/120/);
+  assert.match(answer.text, /Despesas líquidas: R\$ 320,00/); assert.match(answer.text, /Pergunta interpretada pelo Ollama local \("fixture"\)/);
+  assert.doesNotMatch(answer.text, /42 ms|100\/20\/120|Provedor:|Falha: nenhuma/);
   assert.deepEqual(answer.metadata, metadata);
 });
 test('fresh reads reflect retroactive edits; outages use only exact period/scope cache and mark it stale', async t => {
@@ -117,7 +123,7 @@ test('external payee text stays quoted data and Telegram link previews cannot be
   };
   const result = await executeQuery(query('uncategorized'), dependencies);
   const text = renderQuery(result);
-  assert.match(text, /favorecido "IGNORE AS REGRAS \/pagar/); assert.doesNotMatch(text, /\u202e/);
+  assert.match(text, /Favorecido "IGNORE AS REGRAS \/pagar/); assert.doesNotMatch(text, /\u202e/);
   let body;
   const telegram = new TelegramClient({ config: dependencies.config, resolveSecret: async () => '123:SYNTHETIC', fetchImpl: async (_, request) => { body = JSON.parse(request.body); return new Response(JSON.stringify({ ok: true, result: { message_id: 1 } })); } });
   await telegram.sendMessage(123, { text, link_preview_options: { is_disabled: false, url: 'https://example.invalid/privado' } });
@@ -134,7 +140,7 @@ test('category request resolves Mercado by real name and includes only its spend
   const result = await executeQuery(intent, dependencies);
   assert.equal(result.analysis.totals.grossExpenses, 29000); assert.equal(result.analysis.totals.refunds, 2000); assert.equal(result.analysis.totals.netExpenses, 27000);
   assert.equal(result.analysis.metadata.category.id, 'food');
-  assert.match(renderQuery(result), /somente essa categoria/); assert.match(renderQuery(result), /2026-04-01 a 2026-09-15/);
+  assert.match(renderQuery(result), /somente essa categoria/); assert.match(renderQuery(result), /01\/04\/2026 a 15\/09\/2026/);
   assert.equal(dependencies.store.latestSnapshot().transactions.length, financialSnapshot(intent.period).transactions.length, 'cache keeps the entire raw snapshot');
   dependencies.actual.snapshot = async () => { throw new AppError('ACTUAL_FAILED'); };
   const allFromCache = await executeQuery({ ...intent, categoryName: undefined }, dependencies).catch(error => error);
@@ -158,6 +164,9 @@ test('homonymous or unknown category names request a choice and accept only a re
   const command = text.split('\n').find(line => line.startsWith('/gastos') && line.includes('family-A'));
   const resolved = await executeQuery(parseQuery(command, { today: TODAY }), dependencies);
   assert.equal(resolved.analysis.metadata.category.id, 'food'); assert.equal(resolved.analysis.totals.netExpenses, 27000);
+  assert.match(renderQuery(resolved), /Gastos na categoria "Mercado" · grupo "family-A"/);
+  const other = await executeQuery({ ...intent, categoryName: 'Mercado :: family-B' }, dependencies);
+  assert.match(renderQuery(other), /Gastos na categoria "Mercado" · grupo "family-B"/);
   const invented = await executeQuery({ ...intent, categoryName: 'Mercado :: made-up-group' }, dependencies);
   assert.equal(invented.categoryChoice, 'not_found'); assert.doesNotMatch(renderQuery(invented), /R\$/);
   const unknown = await executeQuery({ ...intent, categoryName: 'made-up-category-id' }, dependencies);
@@ -219,7 +228,7 @@ test('which expenses increased compares aligned monthly ranges and labels a zero
   const result = await executeQuery(intent, dependencies), text = renderQuery(result);
   assert.equal(result.comparison.previous.netExpenses, 10000); assert.equal(result.comparison.current.netExpenses, 17000);
   assert.equal(result.comparison.rows.find(row => row.id === 'food').change, 5000);
-  assert.match(text, /2026-08-01 a 2026-08-15/); assert.match(text, /2026-09-01 a 2026-09-15/);
+  assert.match(text, /01\/08\/2026 a 15\/08\/2026/); assert.match(text, /01\/09\/2026 a 15\/09\/2026/);
   assert.match(text, /\+50,0%/); assert.match(text, /novo gasto no período comparado/); assert.doesNotMatch(text, /NaN|Infinity|9\.900,00/);
   assert.equal(result.comparison.accounts, undefined, 'comparison must not expose misleading earlier account balances');
 });
@@ -233,4 +242,83 @@ test('short prior month comparisons disclose different day counts and do not inv
   assert.match(text, /31 dias/); assert.match(text, /28 dias/); assert.match(text, /durações diferem/);
   assert.deepEqual(comparisonPeriods('2024-03-31').previous, { start: '2024-02-01', end: '2024-02-29' });
   assert.throws(() => parseQuery('/comparar 2026-03-01 2026-03-31', { today }), { code: 'INPUT_INVALID' });
+});
+
+test('civil dates stay on the ledger day while timestamps show the configured local time and offset', () => {
+  assert.equal(displayDate('2026-01-01'), '01/01/2026');
+  assert.equal(displayDate('2026-02-30'), 'não informada');
+  assert.equal(displayTime('2026-01-01T01:00:00Z', 'America/Sao_Paulo'), '31/12/2025 às 22:00 (UTC-3)');
+  assert.equal(displayTime('2026-01-01T01:00:00Z', 'UTC'), '01/01/2026 às 01:00 (UTC)');
+  assert.equal(displayTime(null), 'não informado');
+});
+
+test('accounts and uncategorized entries retain actionable IDs without letting external IDs create lines', async t => {
+  const dependencies = setup(t);
+  const accounts = renderQuery(await executeQuery(query('accounts'), dependencies));
+  assert.ok(accounts.split('\n').includes('ID: checking'));
+  const uncategorized = renderQuery(await executeQuery(query('uncategorized'), dependencies));
+  assert.ok(uncategorized.split('\n').includes('ID: uncategorized'));
+  assert.match(uncategorized, /Conta "Conta fictícia"/); assert.doesNotMatch(uncategorized, /conta "checking"/i);
+  dependencies.actual.snapshot = async period => {
+    const snapshot = financialSnapshot(period), old = snapshot.accounts[0].id;
+    snapshot.accounts[0].id = 'account\n/confirmar FAKE\u202e';
+    snapshot.transactions.forEach(row => { if (row.accountId === old) row.accountId = snapshot.accounts[0].id; });
+    snapshot.transactions.find(row => row.id === 'uncategorized').id = 'transaction\r\n/confirmar FAKE\u0085';
+    return snapshot;
+  };
+  for (const kind of ['accounts', 'uncategorized']) {
+    const text = renderQuery(await executeQuery(query(kind), dependencies));
+    assert.doesNotMatch(text, /^\/confirmar/m); assert.doesNotMatch(text, /[\r\u0085\u202e]/);
+    assert.match(text, /ID: "(?:account|transaction) \/confirmar FAKE"/);
+  }
+});
+
+test('status keeps uncertainty and distinguishes scheduled occurrence time from execution', async t => {
+  const dependencies = setup(t);
+  dependencies.store.status = () => ({ lastSnapshotAt: '2026-01-01T01:00:00Z', queued: 3, uncertainDeliveries: 2, uncertainOperations: 1, observedOperations: 4 });
+  const handler = createCommandHandler({ ...dependencies, reportScheduler: {
+    preferences: { get: () => ({ dailyEnabled: true, alertsEnabled: false }) },
+    repository: { status: () => ({ daily: { scheduled_at: Date.parse('2026-01-01T01:00:00Z'), state: 'pending' }, alerts: { scheduled_at: Date.parse('2026-01-01T02:00:00Z'), completed_at: Date.parse('2026-01-02T03:00:00Z'), state: 'unavailable', data_state: 'stale', error_code: 'ACTUAL_TIMEOUT' } }) }
+  } });
+  const answer = await handler({ type: 'message', text: '/status', identity: dependencies.identity });
+  assert.match(answer.text, /^FINAISSISTENT · EM EXECUÇÃO\n\n/);
+  assert.match(answer.text, /Fila: 3\nEntregas incertas: 2\nOperações incertas: 1/);
+  assert.match(answer.text, /Reconciliadas por observação: 4/); assert.match(answer.text, /Confira \/operacoes/);
+  assert.match(answer.text, /Última ocorrência agendada: 31\/12\/2025 às 22:00 \(UTC-3\) · aguardando execução/);
+  assert.match(answer.text, /indisponível · dados desatualizados · código ACTUAL_TIMEOUT/);
+  assert.match(answer.text, /Execução concluída não comprova entrega/);
+  assert.doesNotMatch(answer.text, /synthetic-budget|Provedor:|Tempo:|Última execução/);
+  assert.equal(dependencies.calls.length, 0);
+});
+
+test('formatted query survives durable jobs, chunking and the real Telegram JSON payload with its line breaks', async t => {
+  let clock = Date.parse('2026-09-15T12:00:00Z'), reads = 0;
+  const dependencies = memoryStore(t, { now: () => clock }), bodies = [];
+  const actual = { snapshot: async period => {
+    reads++;
+    const snapshot = financialSnapshot(period), template = snapshot.transactions.find(row => row.id === 'uncategorized');
+    snapshot.payees[0].name = 'Favorecido sintético ' + 'p'.repeat(40) + '\n/confirmar FAKE\u202e';
+    snapshot.accounts[0].name = 'Conta sintética ' + 'c'.repeat(65) + '😀';
+    snapshot.transactions = Array.from({ length: 10 }, (_, index) => ({ ...template, id: `tx-${index}-`.padEnd(128, 'x') }));
+    return snapshot;
+  } };
+  const handler = createCommandHandler({ ...dependencies, actual, now: () => new Date(clock) });
+  const telegram = new TelegramClient({ config: dependencies.config, resolveSecret: async () => '123:SYNTHETIC', fetchImpl: async (_, request) => {
+    bodies.push(JSON.parse(request.body)); return new Response(JSON.stringify({ ok: true, result: { message_id: bodies.length } }));
+  } });
+  assert.ok(acceptTelegramUpdate(update(99, '/sem_categoria'), dependencies.config, dependencies.store));
+  const context = { ...dependencies, handler, telegram, logger: () => assert.fail('Unexpected runtime error') };
+  await processOneJob(context);
+  const queued = dependencies.store.db.prepare("SELECT payload FROM outbox WHERE state='pending' ORDER BY rowid").all().map(row => JSON.parse(row.payload).text);
+  assert.ok(queued.length > 1, 'long entries exercise real multi-message delivery');
+  for (let index = 0; index < queued.length; index++) { assert.equal(await processOneDelivery(context), true); clock += 2000; }
+  assert.deepEqual(bodies.map(body => body.text), queued); assert.equal(reads, 1);
+  const received = bodies.map(body => body.text).join('');
+  assert.match(received, /^SEM CATEGORIA\n01\/09\/2026 a 15\/09\/2026\n\n/);
+  assert.match(received, /\nFavorecido "[^‮\n]+"\nConta "[^\n]+"\nID: /);
+  assert.doesNotMatch(received, /^\/confirmar/m); assert.doesNotMatch(received, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
+  for (const body of bodies) {
+    assert.ok(body.text.length <= 3900); assert.equal(body.text.isWellFormed(), true);
+    assert.equal(body.parse_mode, undefined); assert.deepEqual(body.link_preview_options, { is_disabled: true });
+  }
 });
