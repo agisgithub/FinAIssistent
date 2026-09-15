@@ -281,13 +281,13 @@ test('real ChatProviders HTTP encoding works through a local tool round with def
     let data;
     if (url.endsWith('/api/tags')) data = { models: [{ name: 'fixture-local:latest', model: 'fixture-local:latest', size: 100, digest: 'a'.repeat(64), details: { format: 'gguf' } }] };
     else if (url.endsWith('/api/show')) data = { details: { format: 'gguf' }, capabilities: ['completion','tools'], model_info: { 'general.architecture': 'fixture', 'fixture.context_length': 32768 } };
-    else if (url.endsWith('/api/chat')) { chats++; data = { model: 'fixture-local:latest', done: true, done_reason: 'stop', message: chats === 1 ? { role: 'assistant', content: '', thinking: 'NATIVE_PRIVATE_THINKING', tool_calls: [{ function: { name: 'search_transactions', arguments: { start: TODAY, end: TODAY, pageSize: 1 } } }] } : { role: 'assistant', content: 'Encontrei este lançamento.' }, prompt_eval_count: 20, eval_count: 10 }; }
+    else if (url.endsWith('/api/chat')) { chats++; data = { model: 'fixture-local:latest', done: true, done_reason: 'stop', message: chats === 1 ? { role: 'assistant', content: '', thinking: 'NATIVE_PRIVATE_THINKING', tool_calls: [{ id: 'call_search_transaction', function: { index: 0, name: 'search_transactions', arguments: { start: TODAY, end: TODAY, pageSize: 1 } } }] } : { role: 'assistant', content: 'Encontrei este lançamento.' }, prompt_eval_count: 20, eval_count: 10 }; }
     else assert.fail('Unexpected HTTP path');
     return new Response(JSON.stringify(data));
   } });
   const result = await f.send('Busque um lançamento');
   assert.equal(chats, 2); assert.match(result.response.text, /Encontrei este lançamento/); assert.match(result.response.text, /R\$ 123,45/);
-  assert.ok(http.filter(row => row.url.endsWith('/api/chat'))[1].body.messages.some(row => row.role === 'tool'));
+  assert.equal(http.filter(row => row.url.endsWith('/api/chat'))[1].body.messages.find(row => row.role === 'tool').tool_call_id, 'call_search_transaction');
   assert.doesNotMatch(JSON.stringify(f.service.repository.history()), /NATIVE_PRIVATE_THINKING|providerContent|tool_calls/);
 });
 

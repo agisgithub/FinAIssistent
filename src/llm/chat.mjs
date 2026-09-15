@@ -69,7 +69,7 @@ function nativeGemini(content) {
 }
 function nativeOllama(content) {
   if (!object(content) || content.role !== 'assistant' || typeof content.content !== 'string' || content.thinking != null && typeof content.thinking !== 'string' || Object.keys(content).some(k => !['role','content','thinking','tool_calls'].includes(k))) fail();
-  if (content.tool_calls != null && (!Array.isArray(content.tool_calls) || content.tool_calls.some(c => !object(c?.function) || Object.keys(c).some(k => k !== 'function') || Object.keys(c.function).some(k => !['name','arguments','index'].includes(k))))) fail();
+  if (content.tool_calls != null && (!Array.isArray(content.tool_calls) || content.tool_calls.some(c => !object(c?.function) || Object.keys(c).some(k => !['id','function'].includes(k)) || Object.keys(c.function).some(k => !['name','arguments','index'].includes(k))))) fail();
   return structuredClone(content);
 }
 function encodeMessages(messages, provider, model, tools, max) {
@@ -83,7 +83,7 @@ function encodeMessages(messages, provider, model, tools, max) {
       let result; try { result = JSON.parse(m.content); } catch { fail('INPUT_INVALID'); }
       if (!object(result) || !jsonValue(result)) fail('INPUT_INVALID');
       pending.delete(m.toolCallId);
-      if (provider === 'ollama') output.push({ role:'tool',tool_name:m.name,content:m.content });
+      if (provider === 'ollama') output.push({ role:'tool',tool_name:m.name,...(item.nativeId ? {tool_call_id:item.nativeId} : {}),content:m.content });
       else {
         const part = { functionResponse: { ...(item.nativeId ? {id:item.nativeId} : {}), name:m.name, response:result } };
         if (output.at(-1)?.role === 'user' && output.at(-1).parts.some(p => p.functionResponse)) output.at(-1).parts.push(part);
@@ -96,13 +96,13 @@ function encodeMessages(messages, provider, model, tools, max) {
     if (!native && (m.toolCalls?.length ?? 0)) fail('INPUT_INVALID');
     if (m.role === 'assistant' && native) {
       const content = provider === 'gemini' ? nativeGemini(m.providerContent.content) : nativeOllama(m.providerContent.content);
-      const raw = provider === 'gemini' ? content.parts.filter(p => p.functionCall).map(p => p.functionCall) : (content.tool_calls ?? []).map(c => ({name:c.function.name,args:c.function.arguments}));
+      const raw = provider === 'gemini' ? content.parts.filter(p => p.functionCall).map(p => p.functionCall) : (content.tool_calls ?? []).map(c => ({id:c.id,name:c.function.name,args:c.function.arguments}));
       const common = checkedCalls(m.toolCalls ?? [], tools, max);
       if (raw.length !== common.length) fail('INPUT_INVALID');
       for (const [i, c] of common.entries()) {
         if (raw[i].name !== c.name || JSON.stringify(raw[i].args === undefined ? {} : raw[i].args) !== JSON.stringify(c.args)) fail('INPUT_INVALID');
-        if (provider === 'gemini' && raw[i].id != null && (!idOK(raw[i].id) || raw[i].id !== c.id)) fail('INPUT_INVALID');
-        pending.set(c.id,{name:c.name,nativeId:provider === 'gemini' ? raw[i].id : undefined});
+        if (raw[i].id != null && (!idOK(raw[i].id) || raw[i].id !== c.id)) fail('INPUT_INVALID');
+        pending.set(c.id,{name:c.name,nativeId:raw[i].id});
       }
       output.push(content);
     } else if (m.content) output.push(provider === 'gemini' ? {role:m.role === 'assistant'?'model':'user',parts:[{text:m.content}]} : {role:m.role,content:m.content});
@@ -219,7 +219,7 @@ export class ChatProviders {
       } else {
         if(isRemoteModel(data)||data.done!==true||data.done_reason!=null&&data.done_reason!=='stop'||typeof data.model!=='string'||canonicalModel(data.model)!==model) fail();
         raw=nativeOllama(data.message);
-        calls=checkedCalls((raw.tool_calls??[]).map(c=>({name:c.function.name,args:c.function.arguments})),tools,this.assistant.maxToolCalls,{native:true});
+        calls=checkedCalls((raw.tool_calls??[]).map(c=>({id:c.id,name:c.function.name,args:c.function.arguments})),tools,this.assistant.maxToolCalls,{native:true});
         text=raw.content;
       }
       if(!text.trim()&&!calls.length) fail();

@@ -45,6 +45,39 @@ test('Ollama tool round uses native message including thinking and correlates bo
   await client.complete({provider:'ollama',messages:[...messages,first.assistantMessage,{role:'tool',name:tool.name,toolCallId:first.toolCalls[0].id,content:'{"ok":true}'}],tools:[tool]});
   const body=fake.calls.at(-1).body;assert.equal(body.stream,false);assert.deepEqual(body.messages[2],raw);assert.deepEqual(body.messages[3],{role:'tool',tool_name:tool.name,content:'{"ok":true}'});
 });
+test('Ollama native tool IDs are accepted and correlated in parallel tool responses',async()=>{
+  const raw={role:'assistant',content:'',tool_calls:[
+    {id:'call_search_1',function:{index:0,name:tool.name,arguments:{command:'/resumo'}}},
+    {id:'call_search_2',function:{index:1,name:tool.name,arguments:{command:'/contas'}}}
+  ]};
+  const fake=localFetch({model:'local-test:latest',done:true,done_reason:'stop',message:raw,eval_count:22});
+  const client=new ChatProviders(config(),{fetchImpl:fake.fetch});
+  const first=await client.complete({provider:'ollama',messages,tools:[tool]});
+  assert.deepEqual(first.toolCalls.map(c=>c.id),['call_search_1','call_search_2']);
+  const history=[...messages,first.assistantMessage,...first.toolCalls.map(c=>({role:'tool',name:c.name,toolCallId:c.id,content:'{"ok":true}'}))];
+  await client.complete({provider:'ollama',messages:history,tools:[tool]});
+  const sent=fake.calls.at(-1).body.messages;
+  assert.deepEqual(sent[2],raw);
+  assert.deepEqual(sent.slice(3).map(m=>m.tool_call_id),['call_search_1','call_search_2']);
+  assert.equal(sent[3].tool_name,tool.name);
+  const altered=structuredClone(history);altered[2].providerContent.content.tool_calls[0].id='different_id';
+  const before=fake.calls.length;
+  await assert.rejects(client.complete({provider:'ollama',messages:altered,tools:[tool]}),/INPUT_INVALID/);
+  assert.equal(fake.calls.length,before);
+});
+
+test('Ollama native tool IDs do not bypass ID, argument or tool validation',async()=>{
+  const call={id:'call_one',function:{index:0,name:tool.name,arguments:{command:'/resumo'}}};
+  for(const calls of [
+    [{...call,id:12}], [{...call,id:''}], [{...call,id:'bad id'}], [call,call],
+    [{...call,function:{...call.function,name:'arbitrary_write'}}],
+    [{...call,function:{...call.function,arguments:'{}'}}], [{...call,unexpected:true}]
+  ]) {
+    const fake=localFetch({model:'local-test:latest',done:true,done_reason:'stop',message:{role:'assistant',content:'',tool_calls:calls}});
+    await assert.rejects(new ChatProviders(config(),{fetchImpl:fake.fetch}).complete({provider:'ollama',messages,tools:[tool]}),/CHAT_INVALID_RESPONSE/);
+  }
+});
+
 test('Gemini multi-call history preserves native parts, empty signature part and functionResponse IDs',async()=>{
   const raw={role:'model',parts:[{text:'PRIVATE_THOUGHT',thought:true},{text:'',thoughtSignature:'EMPTY_SIGNATURE'},{functionCall:{id:'c1',name:tool.name,args:{command:'/resumo'}},thoughtSignature:'SIGNED_PART'},{functionCall:{id:'c2',name:tool.name,args:{command:'/contas'}}},{text:'Vou consultar.'}]};
   const fake=geminiFetch({candidates:[{content:raw,finishReason:'STOP'}],usageMetadata:{promptTokenCount:10,candidatesTokenCount:5,totalTokenCount:17,thoughtsTokenCount:2}});
