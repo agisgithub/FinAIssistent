@@ -2,6 +2,17 @@
 
 O padrão da conversa é Ollama local. Gemini é uma opção explícita por sessão ou pergunta; indisponibilidade nunca provoca troca automática de provedor. Consultas, relatórios, calendário e confirmações determinísticas continuam acessíveis sem modelo. A IA consulta ferramentas fechadas para obter fatos e preparar propostas; confirmação e execução pertencem à aplicação.
 
+## Buscas simples e períodos
+
+Pedidos claros como `Me dê os lançamentos da semana passada inteira`, `Quais foram meus últimos lançamentos?` e `Procure por Brastemp* nos meus lançamentos` consultam a ferramenta diretamente, sem depender de uma geração da IA para calcular datas ou descrever o resultado. A lista continua no contexto e pode ser referenciada por número na conversa seguinte. Condições extras e pedidos compostos permanecem no fluxo de IA; o atalho não descarta filtros que não reconhece.
+
+- Semana passada: segunda-feira a domingo da semana anterior, calculada com a data local do orçamento. Em 15/09/2026, corresponde a 07/09/2026–13/09/2026.
+- Últimos lançamentos sem período: busca nos últimos 12 meses-calendário até hoje, ordenada por data decrescente, até dez itens por página. Não inclui datas futuras nem promete cobrir todo o histórico.
+- Busca por nome/observação sem período: últimos 12 meses-calendário, incluindo o mês atual, e os 12 meses seguintes; a resposta informa o intervalo e inclui registros futuros já existentes. Por exemplo, em setembro de 2026, consulta outubro de 2025 a setembro de 2027.
+- Período explícito substitui essa janela: por exemplo, `Procure Brastemp nos últimos 3 meses`, `Me liste os lançamentos de 2026-09-01 a 2026-09-14` ou `Procure Brastemp nos próximos 3 meses`. Nomes compostos podem ser escritos entre aspas.
+
+Zero resultados se refere somente ao período, filtros e escopo consultados. Uma falha de leitura não é uma lista vazia. O resultado vazio de uma busca feita pela IA também recebe uma resposta delimitada, em vez de uma conclusão gerada sobre períodos que não foram pesquisados.
+
 ## Configurar somente a IA
 
 Depois de configurar Actual e Telegram, execute no servidor Linux:

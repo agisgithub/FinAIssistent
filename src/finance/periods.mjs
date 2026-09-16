@@ -40,6 +40,22 @@ export function resolvePeriod(input, today) {
     const end = day.toISOString().slice(0, 10);
     return boundedPeriod({ start: end.slice(0, 7) + '-01', end }, today);
   }
+  if (['semana passada', 'semana passada inteira', 'esta semana', 'semana atual'].includes(text)) {
+    if (!validDate(today)) throw new AppError('INPUT_INVALID');
+    const monday = new Date(today + 'T12:00:00Z');
+    monday.setUTCDate(monday.getUTCDate() - (monday.getUTCDay() + 6) % 7);
+    const previous = text.startsWith('semana passada');
+    if (previous) monday.setUTCDate(monday.getUTCDate() - 7);
+    const sunday = new Date(monday); sunday.setUTCDate(sunday.getUTCDate() + 6);
+    return boundedPeriod({ start: monday.toISOString().slice(0, 10), end: previous ? sunday.toISOString().slice(0, 10) : today }, today);
+  }
+  const days = /^(?:nos )?ultimos (\d+) dias$/.exec(text);
+  if (days) {
+    const count = Number(days[1]);
+    if (!validDate(today) || count < 1 || count > 366) throw new AppError('INPUT_INVALID');
+    const start = new Date(today + 'T12:00:00Z'); start.setUTCDate(start.getUTCDate() - count + 1);
+    return boundedPeriod({ start: start.toISOString().slice(0, 10), end: today }, today);
+  }
   const months = /^(?:nos )?(?:ultimos )?(\d+|seis) meses$/.exec(text);
   if (months) return calendarMonths(months[1] === 'seis' ? 6 : Number(months[1]), today);
   const dates = /^(\d{4}-\d{2}-\d{2})(?:\s+(?:a |ate )?(\d{4}-\d{2}-\d{2}))?$/.exec(text);

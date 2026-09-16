@@ -10,6 +10,7 @@ import { ConversationService } from '../src/conversation/service.mjs';
 import { createCommandHandler } from '../src/telegram/commands.mjs';
 import { AppError } from '../src/errors.mjs';
 import { ChatProviders } from '../src/llm/chat.mjs';
+import { FinanceTools } from '../src/application/assistant-tools.mjs';
 
 const answer = (text = 'Olá! Posso consultar seu orçamento.', toolCalls = []) => ({ text, toolCalls, assistantMessage: { role: 'assistant', content: text, toolCalls }, usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 } });
 const call = (name, args, id = 'tool-1') => ({ id, name, args });
@@ -49,6 +50,51 @@ function fixture(t, { assistant = {}, disk = false, tools, providers: overrides 
     restart() { store.close(); store = new StateStore(filename, identity, { now: () => clock, conversationConfig: config }); store.recover(); wire(); }
   };
 }
+
+test('reported lookup sequence reads real tool periods and fresh rows without model-invented dates or conclusions', async t => {
+  const f = fixture(t), periods = [];
+  const base = financialSnapshot(), sample = base.transactions.find(row => row.id === 'uncategorized');
+  const rows = [
+    { ...sample, id: 'last-week', date: '2026-09-10', notes: 'Brastemp 1/8' },
+    { ...sample, id: 'yesterday', date: '2026-09-14', notes: 'Outra compra' },
+    { ...sample, id: 'future', date: '2026-10-10', notes: 'Brastemp 2/8' }
+  ];
+  f.actual.snapshot = async period => { periods.push(period); return { ...financialSnapshot(period), transactions: rows.filter(row => row.date >= period.start && row.date <= period.end) }; };
+  f.service.tools = new FinanceTools({ config: f.config, store: f.store, actual: f.actual, now: () => new Date(TODAY + 'T12:00:00Z') });
+  const named = await f.send('Procure por Brastemp* nos meus lançamentos');
+  assert.deepEqual(f.service.repository.selection().rows.map(row => row.id), ['future', 'last-week']);
+  assert.match(named.response.text, /próximos 12/); assert.match(named.response.text, /brastemp\*/);
+  const latest = await f.send('Quais foram meus ultimoslançamentos?');
+  assert.deepEqual(f.service.repository.selection().rows.map(row => row.id), ['yesterday', 'last-week']);
+  assert.match(latest.response.text, /mais recente/);
+  const week = await f.send('Me de os lançamentos da semana passada inteira.');
+  assert.deepEqual(periods.at(-1), { start: '2026-09-07', end: '2026-09-13' });
+  assert.deepEqual(f.service.repository.selection().rows.map(row => row.id), ['last-week']);
+  assert.match(week.response.text, /07\/09\/2026 a 13\/09\/2026/);
+  assert.equal(f.requests.length, 0);
+  assert.deepEqual(await f.invoke(week.request, week.job), week.response); assert.equal(periods.length, 3);
+  await f.send('Explique o item 1');
+  assert.match(JSON.stringify(f.requests.at(-1).messages), /last-week/);
+});
+
+test('direct empty and failed lookups stay scoped and cannot leave earlier selected targets available', async t => {
+  const f = fixture(t, { tools: async (_name, args) => ({ data: { ...search([]).data, period: { start: args.start, end: args.end } } }) });
+  const empty = await f.send('Me liste os últimos lançamentos');
+  assert.match(empty.response.text, /neste período/); assert.match(empty.response.text, /fora dele/);
+  assert.equal(f.requests.length, 0); assert.equal(f.service.repository.selection().rows.length, 0);
+  f.service.tools = { execute: async () => { throw new AppError('ACTUAL_TIMEOUT'); } };
+  const failed = await f.send('Me de os lançamentos da semana passada inteira');
+  assert.match(failed.response.text, /ACTUAL_TIMEOUT/); assert.doesNotMatch(failed.response.text, /Não encontrei/);
+  assert.equal(f.service.repository.selection().complete, false);
+});
+
+test('empty model-driven search cannot claim that unsearched periods have no data', async t => {
+  let round = 0;
+  const f = fixture(t, { tools: async () => search([]), providers: { complete: async () => ++round === 1 ? answer('', [call('search_transactions', { start: TODAY, end: TODAY })]) : answer('O orçamento inteiro está vazio e a semana passada não está disponível.') } });
+  const result = await f.send('Confira aquela compra mencionada antes');
+  assert.doesNotMatch(result.response.text, /orçamento inteiro|semana passada não está disponível/);
+  assert.match(result.response.text, /fora dessa consulta/);
+});
 
 test('natural greeting and follow-up use local conversation, with durable final turns and no native provider frames exported', async t => {
   const f = fixture(t, { disk: true, providers: { complete: async () => ({ ...answer('Olá, vamos conversar.'), assistantMessage: { role: 'assistant', content: 'Olá', providerContent: { provider: 'ollama', secretNative: 'NATIVE_CANARY' } } }) } });
