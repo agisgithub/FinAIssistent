@@ -8,6 +8,7 @@ import { performance } from 'node:perf_hooks';
 import { normalizeSchedules } from './schedules.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { readCategoryCatalog, validateCreateCategory, checkCreationAvailable, checkCreationGroup, categoryFingerprint, sameCategoryName } from './category.mjs';
+import { buildMonthlySpendingSeries, resolveSeriesCategory, seriesRequest } from '../finance/series.mjs';
 
 // Owns the SDK's global lifecycle. Production creates exactly one in its worker.
 // Tests inject an SDK-shaped fake; no model-facing arbitrary method dispatch exists.
@@ -97,6 +98,54 @@ export class ActualExecutor {
         }
       }
       return normalizeSnapshot({ config: this.config, period, accounts: withBalances, categories, categoryGroups, payees, transactions, budgetMonths, syncedAt, failedAccountIds });
+    });
+  }
+  monthlySpendingSeries(input) {
+    const request = seriesRequest(input);
+    return this.runExclusive(async api => {
+      try { await api.sync(); } catch { throw new AppError('ACTUAL_SYNC_FAILED'); }
+      const syncedAt = new Date().toISOString();
+      let catalog, accounts, payees;
+      try {
+        catalog = await readCategoryCatalog(api, this.config);
+        accounts = await api.getAccounts();
+        payees = await api.getPayees();
+      } catch (error) { throw new AppError(errorCode(error, 'ACTUAL_FAILED')); }
+      const selection = resolveSeriesCategory(request.categoryName, catalog.categories, catalog.groups);
+      if (!selection.category) return {
+        kind: 'monthly_spending_series', status: 'choice_required', reason: selection.reason,
+        requested: selection.requested, options: selection.options, period: request.period,
+        householdId: this.config.householdId, budgetId: this.config.actual.budgetId, syncedAt
+      };
+      if (!Array.isArray(accounts) || !Array.isArray(payees) || accounts.length > 10000 || payees.length > 100000) throw new AppError('SNAPSHOT_INVALID');
+      const normalizeId = value => value == null || value === '' ? null : validId(value) ? value : (() => { throw new AppError('SNAPSHOT_INVALID'); })();
+      const normalizeFlag = value => value == null || value === false || value === 0 ? false : value === true || value === 1 ? true : (() => { throw new AppError('SNAPSHOT_INVALID'); })();
+      const normalizedAccounts = accounts.map(account => {
+        if (!validId(account?.id)) throw new AppError('SNAPSHOT_INVALID');
+        return { id: account.id, closed: normalizeFlag(account.closed), offBudget: normalizeFlag(account.offbudget) };
+      });
+      const normalizedPayees = payees.map(payee => {
+        if (!validId(payee?.id)) throw new AppError('SNAPSHOT_INVALID');
+        return { id: payee.id, transferAccountId: normalizeId(payee.transfer_acct) };
+      });
+      if (new Set(normalizedAccounts.map(row => row.id)).size !== normalizedAccounts.length || new Set(normalizedPayees.map(row => row.id)).size !== normalizedPayees.length || typeof api.q !== 'function' || typeof api.aqlQuery !== 'function') throw new AppError('SNAPSHOT_INVALID');
+      let raw;
+      try {
+        const query = api.q('transactions')
+          .filter({ date: { $gte: request.period.start, $lte: request.period.end }, category: selection.category.id })
+          .select(['id', 'date', 'amount', 'category', 'account', 'payee', 'transfer_id', 'is_parent'])
+          .options({ splits: 'inline' });
+        raw = await api.aqlQuery(query);
+      } catch { throw new AppError('ACTUAL_FAILED'); }
+      if (!raw || !Array.isArray(raw.data) || raw.data.length > 1000000) throw new AppError('SNAPSHOT_INVALID');
+      const transactions = raw.data.map(row => {
+        if (!validId(row?.id) || typeof row.date !== 'string' || !Number.isSafeInteger(row.amount) || !validId(row.account) || row.category !== selection.category.id) throw new AppError('SNAPSHOT_INVALID');
+        return { id: row.id, date: row.date, amountCents: row.amount, categoryId: row.category, accountId: row.account,
+          payeeId: normalizeId(row.payee), transferId: normalizeId(row.transfer_id), isParent: normalizeFlag(row.is_parent) };
+      });
+      return buildMonthlySpendingSeries({ request, category: selection.category, groupName: selection.groupName,
+        accounts: normalizedAccounts, payees: normalizedPayees, transactions, syncedAt,
+        identity: { householdId: this.config.householdId, budgetId: this.config.actual.budgetId } });
     });
   }
   readSchedules() {

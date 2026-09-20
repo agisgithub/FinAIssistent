@@ -33,7 +33,16 @@ export async function processOneDelivery({ store, telegram, logger, scheduler })
   if (!row) return false;
   try {
     if (scheduler && !scheduler.authorizeDelivery(row)) { store.finishOutbox(row.id, { state: 'failed' }); return true; }
-    const messageId = await telegram.sendMessage(row.chat_id, row.payload);
+    let messageId;
+    if (row.media_type === 'image/png' && row.media_blob) {
+      try { messageId = await telegram.sendPhoto(row.chat_id, row.payload, { bytes: row.media_blob, filename: row.media_filename }); }
+      catch (error) {
+        // A definitive API rejection means no photo was accepted, so the
+        // accessible text can safely be delivered once as the fallback.
+        if (errorCode(error) !== 'TELEGRAM_REJECTED') throw error;
+        messageId = await telegram.sendMessage(row.chat_id, row.payload);
+      }
+    } else messageId = await telegram.sendMessage(row.chat_id, row.payload);
     store.finishOutbox(row.id, { state: 'sent', messageId });
   } catch (error) {
     const code = errorCode(error, 'DELIVERY_UNCERTAIN');

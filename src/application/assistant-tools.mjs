@@ -1,12 +1,14 @@
 import { AppError } from '../errors.mjs';
 import { validId } from '../actual/transaction.mjs';
 import { validatePeriod } from '../actual/snapshot.mjs';
-import { localToday, normalizeText } from '../finance/periods.mjs';
+import { calendarMonths, localToday, normalizeText } from '../finance/periods.mjs';
 import { DEFAULT_SCOPE, validateScope } from '../finance/analyze.mjs';
 import { parseQuery, COMMANDS } from './dispatch.mjs';
 import { executeQuery, pageItems } from './queries.mjs';
-import { renderQuery } from '../reports/render.mjs';
+import { renderQuery, safeLabel } from '../reports/render.mjs';
 import { AssistantActions } from './assistant-actions.mjs';
+import { renderMonthlySpendingChart, renderMonthlySpendingMessage } from '../reports/chart.mjs';
+import { encodePngPhoto } from '../telegram/media.mjs';
 
 const pageSchema={type:'integer',minimum:1,maximum:100000},sizeSchema={type:'integer',minimum:1,maximum:10};
 const idSchema={type:'string',pattern:'^[A-Za-z0-9_-]{1,128}$'};
@@ -14,6 +16,7 @@ export const FINANCE_TOOL_DEFINITIONS=Object.freeze([
   {name:'search_transactions',description:'Busca lançamentos existentes no Actual por favorecido/observações; * é curinga. Aceita datas futuras, mas não prevê agendamentos nem calcula saldos. Leia a lista e seus IDs antes de propor alterações.',parameters:{type:'object',additionalProperties:false,required:['start','end'],properties:{text:{type:'string',maxLength:200},start:{type:'string',format:'date'},end:{type:'string',format:'date'},uncategorized:{type:'boolean'},categoryId:idSchema,page:pageSchema,pageSize:sizeSchema}}},
   {name:'list_categories',description:'Busca categorias e grupos reais por trecho de nome, sem distinguir maiúsculas/acentos. text filtra categoria; groupText filtra grupo. Categorias e grupos têm paginação separada (page/groupPage). Use somente destinos visíveis; grupos não podem ser criados.',parameters:{type:'object',additionalProperties:false,properties:{text:{type:'string',maxLength:200},groupText:{type:'string',maxLength:200},page:pageSchema,pageSize:sizeSchema,groupPage:pageSchema}}},
   {name:'query_finances',description:'Executa um comando financeiro de leitura existente: /resumo, /gastos, /orcamento, /sem_categoria, /ralos, /contas ou /comparar. Mantém período histórico, escopo e cálculos determinísticos; não aceita comandos de escrita.',parameters:{type:'object',additionalProperties:false,required:['command'],properties:{command:{type:'string',minLength:1,maxLength:4096}}}},
+  {name:'monthly_spending_series',description:'Consulta uma categoria de despesa pelo nome e devolve uma série mensal determinística com gráfico PNG. Use para pedidos de gráfico ou evolução dos gastos. months inclui o mês atual; categoryName deve vir do pedido humano, nunca um ID. Se houver homônimos, a ferramenta pedirá o grupo.',parameters:{type:'object',additionalProperties:false,required:['months','categoryName'],properties:{months:{type:'integer',minimum:1,maximum:24},categoryName:{type:'string',minLength:1,maxLength:200},chartType:{type:'string',enum:['bar','line']}}}},
   {name:'prepare_category_changes',description:'Prepara uma única proposta, nunca executa alterações. Até10 lançamentos já vistos podem receber categorias reais. Para criar categoria em grupo real, inclua newCategory e use categoryId "$new" nos itens desejados; changes vazio cria somente a categoria. A confirmação pertence ao responsável no Telegram.',parameters:{type:'object',additionalProperties:false,required:['changes'],properties:{changes:{type:'array',maxItems:10,items:{type:'object',additionalProperties:false,required:['transactionId','categoryId'],properties:{transactionId:idSchema,categoryId:{type:'string',minLength:1,maxLength:128}}}},newCategory:{type:'object',additionalProperties:false,required:['name','groupId'],properties:{name:{type:'string',minLength:1,maxLength:120},groupId:idSchema}}}}}
 ]);
 function argsObject(value,keys,required=[]) { if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key))||required.some(key=>!Object.hasOwn(value,key)))throw new AppError('INPUT_INVALID'); }
@@ -39,6 +42,7 @@ export class FinanceTools {
     if(name==='prepare_category_changes')return this.actions.prepare(args,request);
     if(name==='search_transactions')return this.search(args,request.identity);
     if(name==='list_categories')return this.categories(args,request.identity);
+    if(name==='monthly_spending_series')return this.monthlySeries(args,request.identity);
     if(name==='query_finances'){
       argsObject(args,['command'],['command']);if(typeof args.command!=='string'||args.command.length>4096||!Object.hasOwn(COMMANDS,args.command.trim().split(/\s+/)[0].toLowerCase()))throw new AppError('INPUT_INVALID');
       const today=localToday(this.config.timezone,this.now()),intent=parseQuery(args.command,{today});
@@ -49,6 +53,25 @@ export class FinanceTools {
       return {data:{kind:'financial_query',text:renderQuery(result),metadata:result.analysis?.metadata??null,complete:!!result.analysis?.metadata.complete,unavailable:!!result.unavailable,incomplete:!!result.incomplete,...(selection?{selection}:{})}};
     }
     throw new AppError('INPUT_INVALID');
+  }
+  async monthlySeries(args,identity) {
+    argsObject(args,['months','categoryName','chartType'],['months','categoryName']);
+    if(!Number.isSafeInteger(args.months)||args.months<1||args.months>24||typeof args.categoryName!=='string'||!args.categoryName.trim()||args.categoryName.length>200||/[\u0000-\u001f\u007f-\u009f]/.test(args.categoryName)||args.chartType!==undefined&&!['bar','line'].includes(args.chartType))throw new AppError('INPUT_INVALID');
+    const period=calendarMonths(args.months,localToday(this.config.timezone,this.now())),scope=validateScope(this.store.getPreference('finance_scope',DEFAULT_SCOPE));
+    const result=await this.actual.monthlySpendingSeries({period,categoryName:args.categoryName.trim(),scope});
+    if(!result||result.householdId!==identity.householdId||result.budgetId!==identity.budgetId||result.period?.start!==period.start||result.period?.end!==period.end)throw new AppError('UNAUTHORIZED');
+    if(result.status==='choice_required'){
+      if(!['ambiguous','not_found'].includes(result.reason)||!Array.isArray(result.options))throw new AppError('SNAPSHOT_INVALID');
+      const requested=safeLabel(result.requested,120),safeOptions=result.options.slice(0,12).map(option=>({name:safeLabel(option.name,100),groupName:safeLabel(option.groupName,100),hidden:option.hidden===true}));
+      const options=safeOptions.map(option=>`${option.name} — grupo ${option.groupName}${option.hidden?' (oculta)':''}`);
+      const lead=result.reason==='ambiguous'?`Há mais de uma categoria chamada “${requested}”.`:`Não encontrei a categoria exata “${requested}”.`;
+      return {data:{kind:'monthly_spending_series',status:'choice_required',reason:result.reason,requested,options:safeOptions,period},message:{text:[lead,'Escolha pelo nome e grupo:',...options.map(row=>`• ${row}`),'Exemplo: “gráfico dos últimos 6 meses para Nome :: Grupo”.'].join('\n')}};
+    }
+    if(result.status!=='ok'||!Array.isArray(result.months)||result.months.length!==args.months)throw new AppError('SNAPSHOT_INVALID');
+    const chartType=args.chartType??'bar',bytes=renderMonthlySpendingChart(result,{chartType}),photo=encodePngPhoto(bytes,`gastos-${period.start.slice(0,7)}-${period.end.slice(0,7)}.png`);
+    const {householdId:_householdId,budgetId:_budgetId,...data}=result;
+    data.category={name:safeLabel(data.category?.name,120),groupName:safeLabel(data.category?.groupName,120)};
+    return {data:{...data,chartType},message:{text:renderMonthlySpendingMessage(result),photo}};
   }
   async categories(args,identity) {
     argsObject(args,['text','groupText','page','pageSize','groupPage']);const {page,pageSize}=paging(args),groupPage=paging({page:args.groupPage}).page;

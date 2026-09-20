@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Assistente financeiro pessoal no Telegram com Actual Budget",
-  "engines": { "node": ">=24 <25" },
+  "engines": {
+    "node": ">=24 <25"
+  },
   "scripts": {
     "start": "node src/main.mjs",
     "preflight": "node scripts/preflight.mjs",
@@ -16,6 +18,7 @@
   },
   "dependencies": {
     "@actual-app/api": "26.9.0",
-    "better-sqlite3": "12.11.1"
+    "better-sqlite3": "12.11.1",
+    "pngjs": "7.0.0"
   }
 }

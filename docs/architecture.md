@@ -79,12 +79,12 @@ O cursor Telegram é vinculado ao ID do bot. Como os IDs podem reiniciar aleator
 
 Um banco **separado**, `runtime-lock.sqlite`, mantém `BEGIN EXCLUSIVE` em modo de rollback por toda a vida do processo. Outra instância não pode obter o mesmo lock. O SO/SQLite libera o lock quando a conexão/processo fecha; não é necessário apagar arquivo após crash. Não coloque esse volume em NFS nem compartilhe o cache com outro programa. Contratos: [transações SQLite](https://www.sqlite.org/lang_transaction.html), [locks SQLite](https://www.sqlite.org/lockingv3.html).
 
-Na recuperação: job de leitura em execução volta à fila; confirmação cuja operação e resposta final já foram persistidas termina sem reexecutar o caso de uso. Demais trabalhos não repetíveis e operações reservadas/em execução viram incertos; a mensagem de recuperação é persistida. Saída em envio vira incerta. A outbox não promete entrega exatamente uma vez no Telegram, que não fornece chave de idempotência para `sendMessage`.
+Na recuperação: job de leitura em execução volta à fila; confirmação cuja operação e resposta final já foram persistidas termina sem reexecutar o caso de uso. Demais trabalhos não repetíveis e operações reservadas/em execução viram incertos; a mensagem de recuperação é persistida. Saída em envio vira incerta. A outbox persiste PNG limitado junto da legenda textual e usa `sendPhoto`; rejeição explícita da foto permite uma única tentativa de `sendMessage`, enquanto resultado incerto nunca é repetido como texto. A outbox não promete entrega exatamente uma vez no Telegram, que não fornece chave de idempotência remota.
 
 Saídas para o mesmo chat têm intervalo mínimo de 1,1s, persistido. Uma resposta explícita `429` com `retry_after` inteiro de 1 a 3600 segundos pode reagendar a mensagem, até cinco tentativas totais. Um timeout ou resposta ambígua permanece incerto e não entra nessa repetição.
 
 ## Fontes dos contratos fixados
 
 - [Actual API v26.9.0 — métodos](https://github.com/actualbudget/actual/blob/v26.9.0/packages/api/methods.ts), [handlers](https://github.com/actualbudget/actual/blob/v26.9.0/packages/loot-core/src/server/api.ts).
-- [Telegram — getUpdates](https://core.telegram.org/bots/api#getupdates), [getMe](https://core.telegram.org/bots/api#getme), [getWebhookInfo](https://core.telegram.org/bots/api#getwebhookinfo), [sendMessage](https://core.telegram.org/bots/api#sendmessage).
+- [Telegram — getUpdates](https://core.telegram.org/bots/api#getupdates), [getMe](https://core.telegram.org/bots/api#getme), [getWebhookInfo](https://core.telegram.org/bots/api#getwebhookinfo), [sendMessage](https://core.telegram.org/bots/api#sendmessage) e [sendPhoto](https://core.telegram.org/bots/api#sendphoto).
 - [better-sqlite3 — transações e backup](https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md).

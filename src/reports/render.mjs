@@ -3,9 +3,12 @@ import { COMMAND_BY_KIND } from '../application/dispatch.mjs';
 import { validDate } from '../actual/snapshot.mjs';
 import { ERROR_CODES } from '../errors.mjs';
 
-export function label(value, max = 90) {
+export function safeLabel(value, max = 90) {
   const text = String(value ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ' ').replace(/\s+/g, ' ').trim();
-  return JSON.stringify(text.length > max ? text.slice(0, max) + '…' : text);
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+export function label(value, max = 90) {
+  return JSON.stringify(safeLabel(value, max));
 }
 const moneyOrUnknown = value => value == null ? 'não informado' : formatMoney(value);
 const actionId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value) ? value : label(value, 128);

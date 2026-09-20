@@ -4,6 +4,7 @@ import { AppError } from '../errors.mjs';
 import { validatePeriod } from './snapshot.mjs';
 import { validateChange, validId } from './transaction.mjs';
 import { validateCreateCategory } from './category.mjs';
+import { seriesRequest } from '../finance/series.mjs';
 const writes = new Set(['changeCategory','createCategory']);
 
 // Only domain operations cross this boundary; never forward SDK method names.
@@ -92,6 +93,15 @@ export class ActualClient {
     try { validatePeriod(period); } catch (error) { return Promise.reject(error); }
     const input = { start: period.start, end: period.end };
     const task = this.#tail.then(() => this.#request('snapshot', input));
+    this.#tail = task.catch(() => {});
+    return task;
+  }
+
+  monthlySpendingSeries(input) {
+    if (this.#closing) return Promise.reject(new AppError('SHUTTING_DOWN'));
+    let args;
+    try { args = seriesRequest(input); } catch (error) { return Promise.reject(error); }
+    const task = this.#tail.then(() => this.#request('monthlySpendingSeries', args));
     this.#tail = task.catch(() => {});
     return task;
   }

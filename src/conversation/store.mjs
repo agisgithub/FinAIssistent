@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { AppError } from '../errors.mjs';
+import { decodePngPhoto } from '../telegram/media.mjs';
 
 const KEYS = 'household_id=? AND budget_id=? AND user_id=? AND chat_id=?';
 export const safeHistoryText = value => String(value ?? '')
@@ -65,7 +66,8 @@ export class ConversationStore {
     return id;
   }
   finish(turnId, response, { selection = null, provider = null, model = null } = {}) {
-    const clean = { text: response.text, ...(response.replyMarkup ? { replyMarkup: response.replyMarkup } : {}), ...(response.dedupeKey ? { dedupeKey: response.dedupeKey } : {}), ...(response.metadata ? { metadata: response.metadata } : {}) };
+    if (response.photo) decodePngPhoto(response.photo);
+    const clean = { text: response.text, ...(response.photo ? { photo: response.photo } : {}), ...(response.replyMarkup ? { replyMarkup: response.replyMarkup } : {}), ...(response.dedupeKey ? { dedupeKey: response.dedupeKey } : {}), ...(response.metadata ? { metadata: response.metadata } : {}) };
     const maxPart = Math.max(512, Math.floor(this.limits.maxContextChars / 3));
     let selectionJson = selection ? JSON.stringify(selection) : null;
     if (selectionJson?.length > this.limits.maxToolResultChars) selectionJson = null;

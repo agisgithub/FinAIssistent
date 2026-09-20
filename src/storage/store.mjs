@@ -9,6 +9,7 @@ import { recoverOperations, pruneOperations } from '../audit/operations.mjs';
 import { withActionMetadata } from '../categorization/response.mjs';
 import { recoverAssistantActions, pruneAssistantActions } from '../application/assistant-actions.mjs';
 import { pruneConversations } from '../conversation/store.mjs';
+import { decodePngPhoto } from '../telegram/media.mjs';
 
 const migrationsPath = fileURLToPath(new URL('../../migrations/', import.meta.url));
 const decode = row => row ? { ...row, payload: row.payload == null ? null : JSON.parse(row.payload) } : null;
@@ -23,12 +24,12 @@ const safeCode = code => ERROR_CODES.has(code) ? code : 'INTERNAL_ERROR';
 // Reset after 48h to avoid expiry/long-poll boundary races without replaying
 // retained messages. A fresh epoch keeps historical local dedupe separate.
 const TELEGRAM_IDLE_RESET_MS = 48 * 60 * 60 * 1000;
-export function splitMessage(text) {
-  if (typeof text !== 'string' || !text || text.length > 100000) throw new AppError('INPUT_INVALID');
+export function splitMessage(text, maxLength = 3900) {
+  if (typeof text !== 'string' || !text || text.length > 100000 || !Number.isSafeInteger(maxLength) || maxLength < 100 || maxLength > 3900) throw new AppError('INPUT_INVALID');
   const chunks = [];
-  while (text.length > 3900) {
-    let end = text.lastIndexOf('\n', 3900);
-    if (end < 1950) end = 3900;
+  while (text.length > maxLength) {
+    let end = text.lastIndexOf('\n', maxLength);
+    if (end < Math.floor(maxLength / 2)) end = maxLength;
     if (/[\uD800-\uDBFF]/.test(text[end - 1])) end--;
     chunks.push(text.slice(0, end));
     text = text.slice(end);
@@ -132,8 +133,8 @@ export class StateStore {
       const row = this.db.prepare("SELECT * FROM jobs WHERE id=? AND household_id=? AND state='running'").get(jobId, this.identity.householdId);
       if (!row) throw new AppError('STORAGE_FAILED');
       if (message) {
-        const chunks = splitMessage(message.text);
-        for (let i = 0; i < chunks.length; i++) this.enqueueOutbox({ ...message, text: chunks[i], replyMarkup: i === chunks.length - 1 ? message.replyMarkup : undefined, dedupeKey: `${message.dedupeKey ?? `job:${jobId}`}:${i}` });
+        const chunks = splitMessage(message.text, message.photo ? 1000 : 3900);
+        for (let i = 0; i < chunks.length; i++) this.enqueueOutbox({ ...message, text: chunks[i], photo: i === 0 ? message.photo : undefined, replyMarkup: i === chunks.length - 1 ? message.replyMarkup : undefined, dedupeKey: `${message.dedupeKey ?? `job:${jobId}`}:${i}` });
       }
       this.db.prepare("UPDATE jobs SET state='done',updated_at=? WHERE id=?").run(this.now(), jobId);
       this.db.prepare("UPDATE job_attempts SET finished_at=?,outcome='done' WHERE job_id=? AND attempt=?").run(this.now(), jobId, row.attempts);
@@ -150,12 +151,13 @@ export class StateStore {
       this.enqueueOutbox(withActionMetadata({ text: `Não foi possível concluir. Código: ${code}.`, dedupeKey: `job-error:${job.id}` }, { reason: 'command_error', failure: code }));
     });
   }
-  enqueueOutbox({ text, dedupeKey, chatId = this.identity.chatId, replyMarkup = undefined }) {
+  enqueueOutbox({ text, dedupeKey, chatId = this.identity.chatId, replyMarkup = undefined, photo = undefined }) {
     if (!keyValid(dedupeKey)) throw new AppError('INPUT_INVALID');
-    if (chatId !== this.identity.chatId || typeof text !== 'string' || text.length < 1 || text.length > 4000) throw new AppError('UNAUTHORIZED');
+    if (chatId !== this.identity.chatId || typeof text !== 'string' || text.length < 1 || text.length > (photo ? 1024 : 4000)) throw new AppError('UNAUTHORIZED');
+    const media = photo ? decodePngPhoto(photo) : null;
     const id = randomUUID();
-    const changes = this.db.prepare("INSERT OR IGNORE INTO outbox(id,household_id,chat_id,dedupe_key,payload,state,available_at,created_at,updated_at) VALUES (?,?,?,?,?,'pending',?,?,?)")
-      .run(id, this.identity.householdId, chatId, dedupeKey, serialized({ text, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }), this.now(), this.now(), this.now()).changes;
+    const changes = this.db.prepare("INSERT OR IGNORE INTO outbox(id,household_id,chat_id,dedupe_key,payload,state,available_at,created_at,updated_at,media_type,media_filename,media_blob) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)")
+      .run(id, this.identity.householdId, chatId, dedupeKey, serialized({ text, ...(replyMarkup ? { reply_markup: replyMarkup } : {}) }), this.now(), this.now(), this.now(), media?.type ?? null, media?.filename ?? null, media?.bytes ?? null).changes;
     return changes ? id : null;
   }
   claimOutbox() {
@@ -219,7 +221,7 @@ export class StateStore {
     this.transaction(() => {
       const yesterday = this.now() - 86400000;
       this.db.prepare("UPDATE jobs SET payload=NULL WHERE state IN ('done','failed') AND updated_at<?").run(yesterday);
-      this.db.prepare("UPDATE outbox SET payload=NULL WHERE state='sent' AND updated_at<?").run(yesterday);
+      this.db.prepare("UPDATE outbox SET payload=NULL,media_type=NULL,media_filename=NULL,media_blob=NULL WHERE state='sent' AND updated_at<?").run(yesterday);
       this.db.prepare('DELETE FROM snapshots WHERE created_at<?').run(this.now() - retentionDays * 86400000);
       pruneOperations(this, retentionDays);
       pruneAssistantActions(this, retentionDays);

@@ -1,5 +1,6 @@
 import { AppError } from '../errors.mjs';
 import { readJsonLimited } from '../http.mjs';
+import { decodePngPhoto, encodePngPhoto } from './media.mjs';
 
 export class TelegramClient {
   constructor({ config, resolveSecret, fetchImpl = fetch }) {
@@ -7,7 +8,7 @@ export class TelegramClient {
     this.resolveSecret = resolveSecret;
     this.fetch = fetchImpl;
   }
-  async call(method, payload, { signal, delivery = false, timeoutMs = 35000 } = {}) {
+  async call(method, payload, { signal, delivery = false, timeoutMs = 35000, multipart = false } = {}) {
     const token = await this.resolveSecret(this.config.telegram.tokenRef);
     if (!/^\d+:[A-Za-z0-9_-]+$/.test(token)) throw new AppError('SECRET_UNAVAILABLE');
     const timeout = AbortSignal.timeout(timeoutMs);
@@ -15,8 +16,8 @@ export class TelegramClient {
     let result;
     try {
       const response = await this.fetch(`https://api.telegram.org/bot${token}/${method}`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload), signal: requestSignal, redirect: 'error'
+        method: 'POST', ...(multipart ? {} : { headers: { 'content-type': 'application/json' } }),
+        body: multipart ? payload : JSON.stringify(payload), signal: requestSignal, redirect: 'error'
       });
       result = await readJsonLimited(response);
       if (result?.ok === false) {
@@ -49,6 +50,18 @@ export class TelegramClient {
   async sendMessage(chatId, payload) {
     if (chatId !== this.config.telegram.chatId) throw new AppError('UNAUTHORIZED');
     const result = await this.call('sendMessage', { ...payload, chat_id: chatId, link_preview_options: { is_disabled: true } }, { delivery: true, timeoutMs: 15000 });
+    if (!Number.isSafeInteger(result?.message_id)) throw new AppError('DELIVERY_UNCERTAIN');
+    return result.message_id;
+  }
+  async sendPhoto(chatId, payload, media) {
+    if (chatId !== this.config.telegram.chatId) throw new AppError('UNAUTHORIZED');
+    if (!payload || typeof payload.text !== 'string' || payload.text.length < 1 || payload.text.length > 1024 || Object.keys(payload).some(key => !['text','reply_markup'].includes(key))) throw new AppError('INPUT_INVALID');
+    const verified = decodePngPhoto(encodePngPhoto(media?.bytes, media?.filename));
+    const form = new FormData();
+    form.set('chat_id', String(chatId)); form.set('caption', payload.text);
+    if (payload.reply_markup) form.set('reply_markup', JSON.stringify(payload.reply_markup));
+    form.set('photo', new Blob([verified.bytes], { type: verified.type }), verified.filename);
+    const result = await this.call('sendPhoto', form, { delivery: true, timeoutMs: 20000, multipart: true });
     if (!Number.isSafeInteger(result?.message_id)) throw new AppError('DELIVERY_UNCERTAIN');
     return result.message_id;
   }
