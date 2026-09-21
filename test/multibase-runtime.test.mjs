@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { AppError } from '../src/errors.mjs';
 import { StateStore } from '../src/storage/store.mjs';
 import { GlobalDeliveryGate, processOneDelivery } from '../src/jobs/runtime.mjs';
 import { runMultiBaseLoops } from '../src/jobs/multi-runtime.mjs';
@@ -60,6 +61,34 @@ test('a blocked HML job cannot hold the principal job consumer', { timeout: 5000
   };
   await runMultiBaseLoops({ config: { retentionDays: 90 }, controlStore: principal, router, runtimes, telegram, logger: () => {}, signal: controller.signal });
   assert.deepEqual(sent, ['principal\n\nBase: principal', 'hml\n\nBase: financa-hml2']);
+});
+
+test('Telegram polling retries network errors but propagates durable router failures', { timeout: 7000 }, async t => {
+  const store = new StateStore(':memory:', identity('principal'), { baseKey: 'principal' });
+  t.after(() => store.close());
+  const runtime = { key: 'principal', store, config: { retentionDays: 90 }, handler: async () => null };
+  const events = [], routerFailure = new Error('ROUTER_DURABILITY_FATAL_CANARY');
+  let polls = 0;
+  const telegram = {
+    getUpdates: async () => {
+      if (++polls === 1) throw new AppError('NETWORK_FAILED');
+      return [{ update_id: 1 }];
+    },
+    sendMessage: async () => 1,
+    answerCallbackQuery: async () => {}
+  };
+  const router = {
+    cursor: () => 0,
+    accept: () => { throw routerFailure; },
+    forwardOne: async () => false,
+    prune: () => {}
+  };
+  await assert.rejects(
+    runMultiBaseLoops({ config: { retentionDays: 90 }, controlStore: store, router, runtimes: [runtime], telegram, logger: (event, detail) => events.push({ event, detail }), signal: new AbortController().signal }),
+    error => error === routerFailure
+  );
+  assert.equal(polls, 2);
+  assert.deepEqual(events, [{ event: 'poll_failed', detail: { code: 'NETWORK_FAILED', integration: 'telegram' } }]);
 });
 
 test('an escaped scheduler failure aborts loops and restart recovery requeues the running safe job', { timeout: 5000 }, async t => {

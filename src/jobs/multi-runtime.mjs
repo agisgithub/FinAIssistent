@@ -23,14 +23,16 @@ export async function runMultiBaseLoops({ config, controlStore, router, runtimes
   };
   const polling = async () => {
     while (!signal.aborted) {
+      let updates;
       try {
-        const updates = await telegram.getUpdates(router.cursor(), signal);
-        for (const update of updates) router.accept(update);
-        if (!updates.length) await pause(50);
+        updates = await telegram.getUpdates(router.cursor(), signal);
       } catch (error) {
         if (!signal.aborted) logger('poll_failed', { code: errorCode(error), integration: 'telegram' });
         await pause(3000);
+        continue;
       }
+      for (const update of updates) router.accept(update);
+      if (!updates.length) await pause(50);
     }
   };
   const forwarding = async () => {
