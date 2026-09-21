@@ -8,7 +8,7 @@ import { canonicalModel, isRemoteModel, safeLocalEntry, localModelInfo, localInv
 
 export const GEMINI_PRIVACY_NOTICE = [
   'GEMINI — ENVIO AO GOOGLE',
-  '• Conteúdo: pergunta, memória limitada e resultados financeiros de ferramentas (nomes, notas, datas e valores). O orçamento completo não é enviado. Resumos continuam sendo dados financeiros.',
+  '• Conteúdo: pergunta, conversa limitada, memórias/metas financeiras ativas e resultados de ferramentas (nomes, notas, datas e valores). O orçamento completo não é enviado. Resumos continuam sendo dados financeiros.',
   '• Sem Cloud Billing ativo no projeto: entradas/saídas podem melhorar produtos e ter revisão humana; os termos orientam não enviar dados pessoais ou sensíveis.',
   '• Com faturamento ativo: entradas/saídas não melhoram produtos, mas há processamento e registros limitados de segurança/abuso. O bot não comprova seu faturamento.',
   '• A chave fica no servidor, usada só para autenticar; senhas/chaves da configuração não entram no contexto. Não cole credenciais no chat: a detecção é limitada.',

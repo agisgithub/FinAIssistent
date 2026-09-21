@@ -39,6 +39,62 @@ test('model tool contract returns authoritative chart immediately and long ordin
   assert.match(f.calls.at(-1).messages[0].content, /no máximo oito linhas/);
 });
 
+test('compound graph and goal request completes both tools and keeps the chart in the final response', async t => {
+  let round = 0;
+  const toolCalls = [
+    { id: 'chart-compound', name: 'monthly_spending_series', args: { months: 6, categoryName: 'Mercado', chartType: 'bar' } },
+    { id: 'goal-compound', name: 'manage_financial_goal', args: { action: 'create', title: 'Reserva', metric: 'manual_savings_progress', targetCents: 10000 } }
+  ];
+  const f = fixture(t, input => {
+    round++;
+    if (round === 1) return { text: '', toolCalls, assistantMessage: { role: 'assistant', content: '', toolCalls } };
+    assert.equal(input.messages.filter(message => message.role === 'tool').length, 2);
+    return { text: 'O gráfico foi gerado e considerei a meta Reserva.', toolCalls: [] };
+  });
+  f.service.tools = { execute: async (name, args) => {
+    f.executions.push({ name, args });
+    if (name === 'monthly_spending_series') return { data: { kind: 'monthly_spending_series', status: 'ok' }, message: { text: 'Gráfico de Mercado', photo } };
+    return { data: { kind: 'companion_proposal', status: 'pending' }, message: { text: 'Proposta de meta Reserva; nada foi gravado.', replyMarkup: { inline_keyboard: [] } } };
+  } };
+  const response = await f.send('Crie minha meta Reserva de R$ 100 e compare com o gráfico de gastos dos últimos 6 meses para Mercado');
+  assert.equal(round, 1); assert.deepEqual(f.executions.map(item => item.name), ['monthly_spending_series','manage_financial_goal']);
+  assert.equal(response.photo.type, 'image/png'); assert.match(response.text, /meta Reserva/i);
+});
+
+test('compound goal and graph keeps the same proposal and photo when the model reverses tool order', async t => {
+  const toolCalls = [
+    { id: 'goal-first', name: 'manage_financial_goal', args: { action: 'create', title: 'Reserva', metric: 'manual_savings_progress', targetCents: 10000 } },
+    { id: 'chart-second', name: 'monthly_spending_series', args: { months: 6, categoryName: 'Mercado', chartType: 'bar' } }
+  ];
+  const f = fixture(t, () => ({ text: '', toolCalls, assistantMessage: { role: 'assistant', content: '', toolCalls } }));
+  f.service.tools = { execute: async (name, args) => {
+    f.executions.push({ name, args });
+    if (name === 'monthly_spending_series') return { data: { kind: 'monthly_spending_series', status: 'ok' }, message: { text: 'Gráfico de Mercado', photo } };
+    return { data: { kind: 'companion_proposal', status: 'pending' }, message: { text: 'Proposta de meta Reserva; nada foi gravado.', replyMarkup: { inline_keyboard: [] } } };
+  } };
+  const response = await f.send('Crie minha meta Reserva de R$ 100 e compare com o gráfico de gastos dos últimos 6 meses para Mercado');
+  assert.deepEqual(f.executions.map(item => item.name), ['manage_financial_goal','monthly_spending_series']);
+  assert.equal(response.photo.type, 'image/png'); assert.match(response.text, /Gráfico de Mercado/); assert.match(response.text, /Proposta de meta Reserva/);
+});
+
+test('compound monthly choice and companion proposal preserve both authoritative messages in either order', async t => {
+  for (const order of [['monthly_spending_series','manage_financial_goal'], ['manage_financial_goal','monthly_spending_series']]) await t.test(order.join(' then '), async st => {
+    const calls = order.map((name, index) => name === 'monthly_spending_series'
+      ? { id: `choice-${index}`, name, args: { months: 6, categoryName: 'Mercado', chartType: 'bar' } }
+      : { id: `goal-${index}`, name, args: { action: 'create', title: 'Reserva', metric: 'manual_savings_progress', targetCents: 10000 } });
+    const f = fixture(st, () => ({ text: '', toolCalls: calls, assistantMessage: { role: 'assistant', content: '', toolCalls: calls } }));
+    f.service.tools = { execute: async name => {
+      f.executions.push({ name });
+      if (name === 'monthly_spending_series') return { data: { kind: 'monthly_spending_series', status: 'choice_required' }, message: { text: 'Escolha Mercado — grupo Casa ou Mercado — grupo Alimentação.' } };
+      return { data: { kind: 'companion_proposal', status: 'pending' }, message: { text: 'Proposta de meta Reserva; nada foi gravado.', replyMarkup: { inline_keyboard: [] } } };
+    } };
+    const response = await f.send('Crie minha meta Reserva e mostre o gráfico dos últimos 6 meses para Mercado');
+    assert.deepEqual(f.executions.map(item => item.name), order);
+    assert.equal(response.photo, undefined);
+    assert.match(response.text, /Escolha Mercado/); assert.match(response.text, /Proposta de meta Reserva/);
+  });
+});
+
 test('concise conversation formatter enforces eight physical lines', () => {
   const result = conciseConversationText(Array.from({ length: 20 }, (_, index) => `linha ${index + 1}`).join('\n'));
   assert.equal(result.split('\n').length, 8);

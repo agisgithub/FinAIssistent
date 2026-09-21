@@ -10,12 +10,14 @@ import { ReportScheduler } from '../jobs/scheduler.mjs';
 import { BillService } from '../application/bills.mjs';
 import { ConversationService } from '../conversation/service.mjs';
 import { AssistantActions } from '../application/assistant-actions.mjs';
+import { CompanionService } from '../companion/service.mjs';
 
 export { localToday } from '../finance/periods.mjs';
-const HELP = 'Conversa: /ia escolhe provedor/modelo; /ia limpar apaga contexto; /gemini pergunta solicita envio remoto com consentimento.\nConsultas: /status, /contas, /resumo, /gastos hoje|mes, /comparar, /orcamento, /sem_categoria, /ralos e /escopo.\nGráficos: peça “gráfico de gastos dos últimos 6 meses para Consumo”.\nRelatórios: /relatorio (consulta imediata); /preferencias para configurar e ativar diário ou alertas (desligados por padrão).\nRecorrências locais: /unidades; /recorrencias ajuda; /proximos_vencimentos; /ocorrencia ID; /pago ID; /reabrir ID.\nCategorias: /categorias; /sugerir <transactionId>; /categorizar <transactionId> <categoryId>.\nOperações: /operacoes; /reconciliar <operationId>; /desfazer <operationId>; /lote [ID] para propostas da conversa. Toda alteração exige proposta e confirmação.\nPeríodo: YYYY-MM-DD YYYY-MM-DD; paginação: pagina 2.\nExemplo: /gastos com Mercado | ultimos 6 meses.\nPerguntas: quanto gastei hoje?; resumo nos últimos seis meses.';
+const HELP = 'Conversa: /ia escolhe provedor/modelo; /ia limpar apaga contexto; /gemini pergunta solicita envio remoto com consentimento.\nCompanheiro: /memorias; /esquecer ID; /metas; /meta pausar|retomar|concluir|cancelar ID. Pedidos naturais de memória ou meta geram proposta; confirme com /confirmar_companion CODIGO ou o botão.\nConsultas: /status, /contas, /resumo, /gastos hoje|mes, /comparar, /orcamento, /sem_categoria, /ralos e /escopo.\nGráficos: peça “gráfico de gastos dos últimos 6 meses para Consumo”.\nRelatórios: /relatorio (consulta imediata); /preferencias para configurar e ativar diário ou alertas (desligados por padrão).\nRecorrências locais: /unidades; /recorrencias ajuda; /proximos_vencimentos; /ocorrencia ID; /pago ID; /reabrir ID.\nCategorias: /categorias; /sugerir <transactionId>; /categorizar <transactionId> <categoryId>.\nOperações: /operacoes; /reconciliar <operationId>; /desfazer <operationId>; /lote [ID] para propostas da conversa. Toda alteração exige proposta e confirmação.\nPeríodo: YYYY-MM-DD YYYY-MM-DD; paginação: pagina 2.\nExemplo: /gastos com Mercado | ultimos 6 meses.\nPerguntas: quanto gastei hoje?; resumo nos últimos seis meses.';
 
-export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = null, actionService = new CategorizationActions({ config, store, actual, now }), billService = new BillService({ config, store, actual, now }), reportScheduler = new ReportScheduler({ config, store, actual, now: () => now().getTime(), upcomingProvider: options => billService.getUpcoming(options) }), chatProviders, financeTools, conversationService, assistantActions = new AssistantActions({ config, store, actual, now }) }) {
-  const conversation = conversationService ?? new ConversationService({ config, store, actual, now, providers: chatProviders, financeTools });
+export function createCommandHandler({ config, store, actual, now = () => new Date(), intentClient = null, actionService = new CategorizationActions({ config, store, actual, now }), billService = new BillService({ config, store, actual, now }), reportScheduler = new ReportScheduler({ config, store, actual, now: () => now().getTime(), upcomingProvider: options => billService.getUpcoming(options) }), chatProviders, financeTools, conversationService, companionService, assistantActions = new AssistantActions({ config, store, actual, now }) }) {
+  const companion = companionService ?? conversationService?.companion ?? financeTools?.companion ?? new CompanionService({ config, store, now });
+  const conversation = conversationService ?? new ConversationService({ config, store, actual, now, providers: chatProviders, financeTools, companionService: companion });
   const legacy = async (request, job) => {
     const startedAt = performance.now();
     const answer = (text, metadata = { provider: 'deterministic', reason: 'deterministic_parser', durationMs: Math.max(0, Math.round(performance.now() - startedAt)) }) => ({ text: [text, renderInterpretation(metadata)].filter(Boolean).join('\n\n'), metadata });
@@ -87,6 +89,15 @@ export function createCommandHandler({ config, store, actual, now = () => new Da
     store.assertIdentity(request.identity);
     const replay = conversation.replay(request, job);
     if (replay) return replay;
+    if (companion.isProposalAction(request)) return store.transaction(() => {
+      const result = companion.handle(request, job);
+      if (!result) throw new AppError('INPUT_INVALID');
+      const response = conversation.remember(request, job, result);
+      store.completeJob(job.id, response);
+      return response;
+    });
+    const companionResult = companion.handle(request, job);
+    if (companionResult) return conversation.remember(request, job, companionResult);
     const control = await conversation.controls(request, job);
     if (control) return control;
     const batch = await assistantActions.handle(request, job);

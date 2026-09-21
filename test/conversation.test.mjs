@@ -185,6 +185,33 @@ test('one-shot remote choice leaves the default local and rejects changed-contex
   await assert.rejects(f.send(callback, { callback: true }), { code: 'PROPOSAL_USED' });
 });
 
+test('persistent Gemini consent is invalidated when the companion memory snapshot changes', async t => {
+  const f = fixture(t);
+  const proposal = (await f.send('/ia gemini')).response;
+  const before = f.service.repository.digest({ memories: [{ b: 2, a: 1 }], goals: [] });
+  const reordered = f.service.repository.digest({ goals: [], memories: [{ a: 1, b: 2 }] });
+  assert.equal(before, reordered, 'companion snapshot hashing is canonical');
+  const request = { type: 'message', text: 'registro interno', identity: f.identity };
+  f.store.enqueueJob({ kind: 'command', payload: request, dedupeKey: 'consent-memory-change' });
+  const job = f.store.claimJob();
+  f.service.companion.repository.recordMemory({ kind: 'financial_note', subject: 'Priorizar reserva' }, f.identity, job);
+  f.store.completeJob(job.id, { text: 'ok' });
+  await assert.rejects(f.send(proposal.replyMarkup.inline_keyboard[0][0].callback_data, { callback: true }), { code: 'PROPOSAL_POLICY_CHANGED' });
+  assert.equal(f.requests.length, 0);
+});
+
+test('one-shot Gemini consent is invalidated when the companion goal snapshot changes', async t => {
+  const f = fixture(t);
+  const proposal = (await f.send('/gemini avalie meu orçamento')).response;
+  const request = { type: 'message', text: 'registro interno', identity: f.identity };
+  f.store.enqueueJob({ kind: 'command', payload: request, dedupeKey: 'consent-goal-change' });
+  const job = f.store.claimJob();
+  f.service.companion.repository.createGoal({ title: 'Reserva', metric: 'manual_savings_progress', targetCents: 100000 }, f.identity, job);
+  f.store.completeJob(job.id, { text: 'ok' });
+  await assert.rejects(f.send(proposal.replyMarkup.inline_keyboard[0][0].callback_data, { callback: true }), { code: 'PROPOSAL_POLICY_CHANGED' });
+  assert.equal(f.requests.length, 0);
+});
+
 test('processed turn is replayed without another model call, including after restart', async t => {
   const f = fixture(t, { disk: true }); const sent = await f.send('oi'); f.restart();
   assert.deepEqual(await f.invoke(sent.request, sent.job), sent.response); assert.equal(f.requests.length, 1);

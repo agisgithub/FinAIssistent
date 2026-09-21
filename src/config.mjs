@@ -4,6 +4,7 @@ import { badConfig as bad } from './config-diagnostics.mjs';
 import { validateOllamaConfig } from './llm/config.mjs';
 import { validateAssistantConfig, validateGeminiConfig } from './llm/chat-config.mjs';
 import { validateCategorizationConfig } from './categorization/recommend.mjs';
+import { validateCompanionConfig } from './companion/config.mjs';
 
 function object(value, keys, field) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) bad(field, 'expected_object');
@@ -12,7 +13,7 @@ function object(value, keys, field) {
 const ref = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value);
 const id = value => Number.isSafeInteger(value) && value > 0;
 export function validateConfig(input, baseDir = process.cwd()) {
-  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization', 'assistant', 'gemini'], 'config');
+  object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization', 'assistant', 'gemini', 'companion'], 'config');
   object(input.telegram, ['userId', 'chatId', 'tokenRef'], 'telegram');
   object(input.actual, ['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs'], 'actual');
   const privacy = input.privacy ?? { externalProviders: false };
@@ -60,7 +61,7 @@ export function validateConfig(input, baseDir = process.cwd()) {
     telegram: Object.freeze({ ...input.telegram }),
     actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
     privacy: Object.freeze({ externalProviders: privacy.externalProviders }),
-    assistant, gemini,
+    assistant, gemini, companion: validateCompanionConfig(input.companion),
     backup: Object.freeze({ keyRef: backup.keyRef ?? null }),
     categorization: validateCategorizationConfig(input.categorization),
     ollama: validateOllamaConfig(input.ollama)

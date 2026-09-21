@@ -13,6 +13,8 @@ const fields = new Set([
   'ollama.timeoutMs', 'ollama.maxInputBytes', 'ollama.maxResponseBytes', 'ollama.contextTokens', 'ollama.outputTokens',
   'assistant', 'assistant.enabled', 'assistant.defaultProvider', 'assistant.historyTtlMinutes', 'assistant.maxTurns',
   'assistant.maxToolRounds', 'assistant.maxToolCalls', 'assistant.maxContextChars', 'assistant.maxToolResultChars', 'assistant.maxRequestBytes', 'assistant.outputTokens',
+  'companion', 'companion.enabled', 'companion.memoryDefaultTtlDays', 'companion.maxContextMemories',
+  'companion.maxContextGoals', 'companion.maxContextChars',
   'gemini', 'gemini.enabled', 'gemini.model', 'gemini.apiKeyRef', 'gemini.timeoutMs', 'gemini.maxResponseBytes', 'gemini.outputTokens'
 ]);
 const reasons = new Set([

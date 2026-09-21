@@ -4,7 +4,7 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-O projeto reúne as fases 0 a 1D e 2, com conversa assistida: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; a conversa pode consultar ferramentas e preparar propostas, com Ollama como padrão e Gemini por escolha explícita.
+O projeto reúne as fases 0 a 1D, 2 e o companheiro financeiro 3A: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, memórias e metas declaradas, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações, as memórias, as metas e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; a conversa pode consultar ferramentas e preparar propostas, com Ollama como padrão e Gemini por escolha explícita.
 
 Unidades, recorrências e registros manuais de pagamento exigem confirmação no Telegram. Lembretes de datas cadastradas e consultas ao calendário funcionam mesmo sem Actual ou modelo disponíveis. E-mail, cofre e portais ficam fora deste marco; não há execução de pagamento bancário. [Escopo e provas](docs/scope.md).
 
@@ -56,6 +56,9 @@ Inicie somente se o pré-teste passar. Ele verifica configuração, segredos e a
 | `/ia`, `/ia ollama`, `/ia gemini` | Provedor da conversa; Gemini exige aviso e confirmação de contexto |
 | `/ia modelos`, `/ia modelo ID`, `/ia limpar` | Modelos disponíveis, escolha e limpeza da memória ativa |
 | `/gemini pergunta` | Pergunta remota única, após confirmação; conserva o provedor padrão |
+| `/memorias`, `/esquecer ID` | Lista memórias financeiras ativas ou cancela uma memória e a remove do contexto ativo |
+| `/metas`, `/meta pausar\|retomar\|concluir\|cancelar ID` | Lista e controla metas financeiras declaradas |
+| `/confirmar_companion CODIGO`, `/cancelar_companion CODIGO` | Confirma ou descarta uma proposta de memória/meta criada pela conversa |
 | `/lote [ID]`, `/confirmar_lote CÓDIGO`, `/cancelar_lote CÓDIGO` | Estado ou confirmação de proposta financeira preparada pela conversa |
 | `/relatorio` | Relatório imediato com saldos, dia/mês, orçamento, incomuns e ações; não ativa a agenda |
 | `/preferencias` | Consulta e configura diário, alertas, fuso da agenda, dias, hora, detalhe e limites |
@@ -192,5 +195,6 @@ node --test --test-isolation=none test/finance.test.mjs test/periods.test.mjs te
 - [Regras de relatórios e anomalias](docs/reporting.md)
 - [Recorrências, unidades e calendário local](docs/recurrences.md)
 - [Regras de histórico, calendário e compatibilidade](docs/recurrence-domain.md)
+- [Memórias, metas e orientação do companheiro financeiro](docs/companion.md)
 
 Os testes usam dados sintéticos e adaptadores simulados, além do teste isolado do SDK fixado. Não comprovam conexão ao orçamento, bot ou servidor de produção.

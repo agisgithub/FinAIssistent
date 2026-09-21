@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import { errorCode } from '../errors.mjs';
+import { AppError, errorCode } from '../errors.mjs';
 import { acceptTelegramUpdate } from '../telegram/ingress.mjs';
 
 export async function processOneJob({ store, handler, telegram, logger, scheduler }) {
@@ -11,7 +11,9 @@ export async function processOneJob({ store, handler, telegram, logger, schedule
       try { await telegram.answerCallbackQuery(job.payload.callbackId); } catch {}
     }
     const result = await handler(job.payload, job);
-    store.completeJob(job.id, result);
+    const state = store.db.prepare('SELECT state FROM jobs WHERE id=?').get(job.id)?.state;
+    if (state === 'running') store.completeJob(job.id, result);
+    else if (state !== 'done') throw new AppError('STORAGE_FAILED');
   } catch (error) {
     if (scheduler?.owns(job)) {
       if (store.db.prepare('SELECT state FROM jobs WHERE id=?').get(job.id)?.state === 'done') return true;
