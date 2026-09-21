@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { badConfig } from '../config-diagnostics.mjs';
 
 export const validTargetId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
+export const AUTOMATIC_POLICY_VERSION = 'companion-high-confidence-v1';
 export function validateCategorizationConfig(value = {}) {
   const bad = (field, reason) => badConfig('categorization' + (field ? '.' + field : ''), reason);
   if (!value || Array.isArray(value) || typeof value !== 'object') bad('', 'expected_object');
@@ -25,6 +26,29 @@ export function featureKey(context, transaction) {
 export function confidence(score, { source, conflict = false, count = 0, agreement = 0 }) {
   if (!conflict && score >= .95 && (source === 'rule' || (source === 'confirmed' && count >= 5 && agreement >= .9))) return 'alta';
   return score >= .7 ? 'média' : 'baixa';
+}
+
+export function automaticCandidate(options) {
+  if (!Array.isArray(options) || options.length !== 1) return null;
+  const candidate = options[0];
+  return candidate?.confidence === 'alta' && candidate.score >= .95 && candidate.evidence?.conflict === false && ['rule','confirmed'].includes(candidate.source)
+    ? candidate : null;
+}
+
+export function automaticPolicyHash(config) {
+  const value = {
+    version: AUTOMATIC_POLICY_VERSION,
+    householdId: config.householdId,
+    budgetId: config.actual?.budgetId,
+    serverURL: config.actual?.serverURL,
+    dryRun: config.dryRun,
+    backupKeyRef: config.backup?.keyRef ?? null,
+    monitor: config.companion?.transactionMonitorEnabled === true,
+    automatic: config.companion?.autoCategorizeHighConfidence === true,
+    rules: config.categorization?.rules ?? [],
+    threshold: { unique: true, confidence: 'alta', score: .95, conflict: false, sources: ['rule','confirmed'] }
+  };
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 export function recommendCategories({ inspection, rules = [], examples = [], history = [] }) {

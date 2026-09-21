@@ -19,7 +19,9 @@ export function renderProposal(p) {
   if (p.state !== 'pending') return { text: `Proposta ${p.id}: ${p.state}. Não será executada novamente.` };
   const d = p.display;
   const undoNote = p.kind === 'undo' ? `Desfazer a categoria de uma operação anterior.${d.originalUncertain ? ' O resultado original foi incerto; o estado posterior foi observado em uma nova leitura.' : ''}\n` : '';
-  const reason = p.kind === 'undo' ? (d.originalUncertain ? 'restaurar a categoria anterior a partir do estado observado; autoria da alteração original não comprovada' : 'reverter a categoria da operação confirmada') : 'categoria escolhida explicitamente pelo responsável';
+  const reason = p.kind === 'undo' ? (d.originalUncertain ? 'restaurar a categoria anterior a partir do estado observado; autoria da alteração original não comprovada' : 'reverter a categoria da operação confirmada')
+    : p.reason?.source === 'monitor' ? `sugestão do monitor baseada em ${p.reason.recommendation?.source === 'rule' ? 'regra local' : p.reason.recommendation?.source === 'confirmed' ? 'confirmações anteriores' : 'histórico'}; confiança ${p.reason.recommendation?.confidence ?? 'não informada'}, escore ${Number.isFinite(p.reason.recommendation?.score) ? p.reason.recommendation.score.toFixed(2) : 'não informado'}${p.reason.memory ? '; uma memória foi mostrada apenas como contexto e não alterou o escore' : ''}`
+      : 'categoria escolhida explicitamente pelo responsável';
   const categoryDetails = `Grupos: ${label(d.beforeGroup)} → ${label(d.afterGroup)}.\nIDs de categoria: ${p.before.categoryId ?? 'sem categoria'} → ${p.after.categoryId ?? 'sem categoria'}.`;
   return {
     text: `${p.dry_run ? 'SIMULAÇÃO — confirmar não altera o Actual.' : 'Alteração proposta — exige confirmação.'}\n${undoNote}Lançamento: ${p.before.id}\nData: ${p.before.date}; valor: ${formatMoney(p.before.amount)}.\nFavorecido: ${label(d.payeeName ?? p.before.payeeId ?? 'não informado')}.\nConta: ${label(d.accountName)}.\nCategoria: ${label(d.beforeCategory)} → ${label(d.afterCategory)}.\n${categoryDetails}\nSomente o campo categoria será alterado.\nMotivo: ${reason}.\nVálida até ${new Date(p.expires_at).toISOString()} (15 minutos).\n/confirmar ${p.nonce}\n/cancelar ${p.nonce}`,
@@ -37,5 +39,6 @@ export function renderOperation(op) {
     reserved: 'Confirmação reservada; operação ainda sem resultado.',
     executing: 'Operação em andamento; não repita a confirmação.'
   };
-  return { text: `Operação ${op.id}\n${messages[op.state] ?? 'Estado indisponível.'}${op.error_code ? `\nCódigo: ${op.error_code}.` : ''}${op.target_id ? `\nLançamento: ${op.target_id}.` : ''}${op.state === 'uncertain' ? `\n/reconciliar ${op.id}` : ''}${['applied','observed_after'].includes(op.state) && op.kind === 'category' && op.before && op.after ? `\n/desfazer ${op.id}` : ''}` };
+  const origin = op.origin === 'companion_high_confidence' ? `\nOrigem: monitor automático de alta confiança${op.decision?.candidate?.source ? ` (${op.decision.candidate.source}; escore ${op.decision.candidate.score.toFixed(2)})` : ''}.` : '';
+  return { text: `Operação ${op.id}\n${messages[op.state] ?? 'Estado indisponível.'}${origin}${op.error_code ? `\nCódigo: ${op.error_code}.` : ''}${op.target_id ? `\nLançamento: ${op.target_id}.` : ''}${op.state === 'uncertain' ? `\n/reconciliar ${op.id}` : ''}${['applied','observed_after'].includes(op.state) && op.kind === 'category' && op.before && op.after ? `\n/desfazer ${op.id}` : ''}` };
 }

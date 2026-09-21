@@ -405,7 +405,11 @@ test('Telegram memory and goal commands remain deterministic and scoped to the b
 
 test('companion configuration has bounded diagnostics and old configs keep defaults', () => {
   const defaults = validateConfig(inputConfig()).companion;
-  assert.deepEqual(defaults, { enabled: true, memoryDefaultTtlDays: 180, maxContextMemories: 12, maxContextGoals: 8, maxContextChars: 4000 });
+  assert.deepEqual(defaults, { enabled: true, transactionMonitorEnabled: false, autoCategorizeHighConfidence: false, memoryDefaultTtlDays: 180, maxContextMemories: 12, maxContextGoals: 8, maxContextChars: 4000 });
+  assert.equal(validateConfig({ ...inputConfig(), companion: { transactionMonitorEnabled: true } }).companion.transactionMonitorEnabled, true);
+  assert.throws(() => validateConfig({ ...inputConfig(), companion: { autoCategorizeHighConfidence: true } }), { code: 'CONFIG_INVALID' });
+  const real = validateConfig({ ...inputConfig(), dryRun: false, backup: { keyRef: 'backup-key' }, companion: { transactionMonitorEnabled: true, autoCategorizeHighConfidence: true } });
+  assert.equal(real.companion.autoCategorizeHighConfidence, true);
   assert.throws(() => validateConfig({ ...inputConfig(), companion: { maxContextGoals: 0 } }), { code: 'CONFIG_INVALID' });
   assert.throws(() => validateConfig({ ...inputConfig(), companion: { unknown: true } }), { code: 'CONFIG_INVALID' });
 });

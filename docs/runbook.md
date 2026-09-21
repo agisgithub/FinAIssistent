@@ -14,6 +14,8 @@ Para ajustar somente modelos e chave de IA, use `bash scripts/configure-ai.sh` n
 6. Para Docker, configure `/data` e `/run/secrets` no JSON. `actual.serverURL` deve ser alcançável a partir do container; `localhost` dentro dele se refere ao próprio container. O compose não publica portas. O servidor Actual é uma implantação separada.
 7. Execute `npm run preflight` ou `docker compose run --rm --no-deps bot node scripts/preflight.mjs` depois de construir a imagem. Esse diagnóstico não usa rede; não comprova senha correta nem disponibilidade remota. Corrija as falhas, execute os testes e inicie com `npm start` ou `docker compose up -d bot`. Teste `/status`, `/contas`, `/gastos` pelo usuário autorizado e confira os valores no Actual.
 
+O monitor de novas transações fica desligado por padrão. Para iniciar somente perguntas, pare o bot, faça backup do SQLite/configuração, defina `companion.transactionMonitorEnabled:true` e reinicie; a primeira leitura completa é um baseline silencioso. Só depois de conferir o baseline e as perguntas, habilite escrita automática com `dryRun:false`, `backup.keyRef` válido e `companion.autoCategorizeHighConfidence:true`. `/status` mostra o modo e a última varredura. Para interromper, volte ambas as flags a `false`; jobs já incertos continuam tombstones e não devem ser repetidos.
+
 A aplicação consulta `getWebhookInfo` e recusa inicialização se houver webhook. Ajuste conscientemente a configuração do bot que será usado para polling; a aplicação não apaga um webhook existente. O bot precisa ter uma conversa privada iniciada pelo responsável.
 
 ## Diagnosticar a inicialização

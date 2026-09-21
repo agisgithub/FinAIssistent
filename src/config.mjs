@@ -56,12 +56,14 @@ export function validateConfig(input, baseDir = process.cwd()) {
   const secretDir = path.resolve(baseDir, input.secretDir ?? './secrets');
   const related = (a, b) => { const relative = path.relative(a, b); return !relative || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative)); };
   if (related(dataDir, secretDir) || related(secretDir, dataDir)) bad('secretDir', 'directories_must_be_separate');
+  const companion = validateCompanionConfig(input.companion);
+  if (companion.autoCategorizeHighConfidence && (dryRun || !backup.keyRef)) bad('companion.autoCategorizeHighConfidence', 'real_write_configuration_required');
   return Object.freeze({
     householdId: input.householdId, timezone, currency, dataDir, secretDir, dryRun, retentionDays,
     telegram: Object.freeze({ ...input.telegram }),
     actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
     privacy: Object.freeze({ externalProviders: privacy.externalProviders }),
-    assistant, gemini, companion: validateCompanionConfig(input.companion),
+    assistant, gemini, companion,
     backup: Object.freeze({ keyRef: backup.keyRef ?? null }),
     categorization: validateCategorizationConfig(input.categorization),
     ollama: validateOllamaConfig(input.ollama)

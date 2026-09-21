@@ -29,8 +29,9 @@ O escopo reúne as fases 1A–1D e 2 e a extensão de conversa com ferramentas. 
 | Propostas locais e migração | `bills.test.mjs`: identidade/política/prazo/replay, atomicidade, recuperação e upgrade 003→004 com dados anteriores | 2 |
 | Lembretes offline e variação | `bills.test.mjs`: opt-in, DST/restart, cancelamento/429, limites AND, histerese e fonte atual | 2 |
 | Aceite pelo fluxo público Telegram | `mvp-bills-acceptance.test.mjs`: ingresso, handler, jobs/outbox e SQLite em disco; unidade/conta confirmadas, Actual/LLM indisponíveis, aviso sem duplicar e pago/reabrir confirmados | 2 |
+| Monitor de novos gastos | `transaction-monitor.test.mjs`: baseline silencioso, elegibilidade, limites/dedupe, alta confiança, perguntas, resolução externa e escrita auditada sem reaprender o próprio resultado | 3B |
 
-Gemini é opcional e desativado por padrão; seu uso depende de configuração no servidor e confirmação de contexto no Telegram, sem fallback remoto. A conversa pode ler ferramentas fechadas e preparar categoria/lote confirmado; não chama métodos arbitrários nem confirma propostas. E-mail, cofre, portais, execução de pagamentos/transferências e escrita sem confirmação permanecem fora do escopo. [Arquitetura e critérios de conversa](conversation.md).
+Gemini é opcional e desativado por padrão; seu uso depende de configuração no servidor e confirmação de contexto no Telegram, sem fallback remoto. A conversa pode ler ferramentas fechadas e preparar categoria/lote confirmado; não chama métodos arbitrários nem confirma propostas. E-mail, cofre, portais e execução de pagamentos/transferências permanecem fora do escopo. A única escrita sem confirmação individual é a categorização 3B opcional, limitada à política de alta confiança documentada em [autorização](authorization.md). [Arquitetura e critérios de conversa](conversation.md).
 
 | Extensão | Prova local |
 | --- | --- |

@@ -13,7 +13,7 @@
   },
   "privacy": { "externalProviders": false },
   "assistant": { "enabled": true, "defaultProvider": "ollama", "historyTtlMinutes": 1440, "maxTurns": 12, "maxToolRounds": 4, "maxToolCalls": 8, "maxContextChars": 24000, "maxToolResultChars": 8000, "outputTokens": 1024 },
-  "companion": { "enabled": true, "memoryDefaultTtlDays": 180, "maxContextMemories": 12, "maxContextGoals": 8, "maxContextChars": 4000 },
+  "companion": { "enabled": true, "transactionMonitorEnabled": false, "autoCategorizeHighConfidence": false, "memoryDefaultTtlDays": 180, "maxContextMemories": 12, "maxContextGoals": 8, "maxContextChars": 4000 },
   "gemini": { "enabled": false, "model": "gemini-3.8-flash", "apiKeyRef": null, "timeoutMs": 60000, "outputTokens": 4096 },
   "backup": { "keyRef": null },
   "categorization": { "rules": [] },

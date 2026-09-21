@@ -39,6 +39,8 @@ Configuração padrão:
 ```json
 "companion": {
   "enabled": true,
+  "transactionMonitorEnabled": false,
+  "autoCategorizeHighConfidence": false,
   "memoryDefaultTtlDays": 180,
   "maxContextMemories": 12,
   "maxContextGoals": 8,
@@ -59,4 +61,6 @@ Guardei mais R$ 250 para a meta Reserva da casa.
 /metas
 ```
 
-Valores financeiros persistidos usam centavos inteiros. Datas usam `YYYY-MM-DD`. Nomes do Actual são referências humanas; esta fase não resolve nem altera automaticamente lançamentos a partir de uma memória.
+Valores financeiros persistidos usam centavos inteiros. Datas usam `YYYY-MM-DD`. Nomes do Actual são referências humanas. O monitor de transações pode usar uma `classification_hint` apenas para enriquecer a pergunta ao responsável; a memória nunca participa do escore, nunca resolve um destino ambíguo e nunca autoriza categorização automática.
+
+O monitor e sua escrita automática começam desligados. Ao ativar somente `transactionMonitorEnabled`, a primeira leitura completa vira baseline silencioso e leituras posteriores perguntam sobre novas despesas elegíveis. `autoCategorizeHighConfidence` exige também escrita real e backup configurado; aplica somente recomendação única, sem conflito, com escore mínimo `0.95`, vinda de regra local ou de confirmações anteriores. Histórico bruto e memória nunca bastam para escrita automática.

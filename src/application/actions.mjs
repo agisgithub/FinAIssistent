@@ -1,6 +1,6 @@
 import { AppError, errorCode } from '../errors.mjs';
 import { OperationJournal, validBackupReference } from '../audit/operations.mjs';
-import { featureKey, recommendCategories, validTargetId } from '../categorization/recommend.mjs';
+import { automaticCandidate, automaticPolicyHash, featureKey, recommendCategories, validTargetId } from '../categorization/recommend.mjs';
 import { withActionMetadata } from '../categorization/response.mjs';
 import { transactionFingerprint } from '../actual/transaction.mjs';
 import { backupState } from '../backups/encrypted.mjs';
@@ -39,7 +39,7 @@ export class CategorizationActions {
     return categoryId;
   }
   async inspect(targetId) { return this.checkInspection(await this.actual.inspectTransaction(id(targetId)), targetId); }
-  async prepare(targetId, categoryId, { identity, job, kind = 'category', undoOf = null, expectedFingerprint = null, originalUncertain = false }) {
+  async prepare(targetId, categoryId, { identity, job, kind = 'category', undoOf = null, expectedFingerprint = null, originalUncertain = false, reason = null }) {
     this.store.assertIdentity(identity);
     const replay = this.journal.fromSource(job, identity);
     if (replay) return renderProposal(replay);
@@ -52,20 +52,19 @@ export class CategorizationActions {
     const categoryGroup = value => { const c = inspection.categories.find(item => item.id === value); return inspection.categoryGroups?.find(g => g.id === c?.groupId)?.name ?? c?.groupId ?? 'sem grupo'; };
     const p = this.journal.create({ kind, before, after, beforeFingerprint: inspection.fingerprint, afterFingerprint: transactionFingerprint(inspection.context, after),
       display: { accountName: inspection.account.name, payeeName: inspection.payee?.name ?? null, beforeCategory: categoryName(before.categoryId), afterCategory: categoryName(categoryId), beforeGroup: categoryGroup(before.categoryId), afterGroup: categoryGroup(categoryId), originalUncertain },
-      reason: { source: kind === 'undo' ? 'undo' : 'explicit', score: null }, expectedCategory: categoryId === null ? null : inspection.categories.find(c => c.id === categoryId), featureKey: featureKey(inspection.context, before), undoOf }, { identity, job, config: this.config });
+      reason: reason ?? { source: kind === 'undo' ? 'undo' : 'explicit', score: null }, expectedCategory: categoryId === null ? null : inspection.categories.find(c => c.id === categoryId), featureKey: featureKey(inspection.context, before), undoOf }, { identity, job, config: this.config });
     return renderProposal(p);
   }
-  async confirm(nonce, { identity, job }) {
+  async executeReserved(operationId, p, { identity, current = null } = {}) {
     const startedAt = performance.now();
     const duration = () => Math.max(0, Math.round(performance.now() - startedAt));
-    const { proposal: p, operationId } = this.journal.reserve(nonce, { identity, job, config: this.config });
     let patchRequested = false;
     try {
-      const current = await this.inspect(p.target_id);
+      current ??= await this.inspect(p.target_id);
       if (current.fingerprint !== p.before_fingerprint) throw new AppError('MUTATION_CONFLICT');
       this.destination(current, p.after.categoryId, p.kind === 'undo');
       if (p.expectedCategory && ['id','name','groupId','isIncome','hidden'].some(k => current.categories.find(c => c.id === p.after.categoryId)?.[k] !== p.expectedCategory[k])) throw new AppError('MUTATION_CATEGORY_INVALID');
-      if (p.dry_run) return finalOperation(this.journal.finish(operationId, { state: 'simulated', durationMs: duration() }));
+      if (p.dry_run) return this.journal.finish(operationId, { state: 'simulated', durationMs: duration() });
       if (!this.config.backup?.keyRef) throw new AppError('BACKUP_FAILED');
       let stateBackupRef;
       try { stateBackupRef = await this.backupStateImpl(this.store, { config: this.config, operationId }); }
@@ -76,12 +75,34 @@ export class CategorizationActions {
       const result = await this.actual.changeCategory({ operationId, targetId: p.target_id, expectedFingerprint: p.before_fingerprint, categoryId: p.after.categoryId, expectedCategory: p.expectedCategory, context: { householdId: identity.householdId, budgetId: identity.budgetId } });
       if (!result || !['applied','failed_before','uncertain'].includes(result.status)) throw new AppError('MUTATION_UNCERTAIN');
       if (result.status === 'applied' && (result.code !== null || !result.before || transactionFingerprint(current.context, result.before) !== p.before_fingerprint || result.beforeFingerprint !== p.before_fingerprint || result.afterFingerprint !== p.after_fingerprint || !result.after || transactionFingerprint(current.context, result.after) !== p.after_fingerprint || !Number.isFinite(Date.parse(result.verifiedAt)) || !validBackupReference(result.backupRef, 'actual', operationId))) throw new AppError('MUTATION_UNCERTAIN');
-      return finalOperation(this.journal.finish(operationId, { state: result.status, code: result.code ?? null, actualBackupRef: result.backupRef ?? null, durationMs: duration() }));
+      return this.journal.finish(operationId, { state: result.status, code: result.code ?? null, actualBackupRef: result.backupRef ?? null, durationMs: duration() });
     } catch (error) {
       // Once the mutation RPC starts, an exception cannot establish non-execution.
       const state = patchRequested ? 'uncertain' : 'failed_before';
-      return finalOperation(this.journal.finish(operationId, { state, code: patchRequested ? 'MUTATION_UNCERTAIN' : errorCode(error), durationMs: duration() }));
+      return this.journal.finish(operationId, { state, code: patchRequested ? 'MUTATION_UNCERTAIN' : errorCode(error), durationMs: duration() });
     }
+  }
+  async confirm(nonce, { identity, job }) {
+    const { proposal, operationId } = this.journal.reserve(nonce, { identity, job, config: this.config });
+    return finalOperation(await this.executeReserved(operationId, proposal, { identity }));
+  }
+  async automatic(targetId, { identity, job, expectedFingerprint, expectedCategoryId, expectedPolicyHash }) {
+    this.store.assertIdentity(identity);
+    const current = await this.inspect(id(targetId));
+    if (current.transaction.categoryId !== null || current.fingerprint !== expectedFingerprint) return { status: 'skipped', reason: 'changed' };
+    const policyHash = automaticPolicyHash(this.config);
+    if (policyHash !== expectedPolicyHash) return { status: 'skipped', reason: 'policy' };
+    const options = recommendCategories({ inspection: current, rules: this.config.categorization?.rules ?? [], examples: this.journal.examples() });
+    const candidate = automaticCandidate(options);
+    if (!candidate || candidate.categoryId !== expectedCategoryId) return { status: 'skipped', reason: 'confidence' };
+    const before = current.transaction, after = { ...before, categoryId: candidate.categoryId };
+    const expectedCategory = current.categories.find(c => c.id === candidate.categoryId);
+    const decision = { policy: 'companion_high_confidence', candidate };
+    const reserved = this.journal.reserveAutomatic({
+      before, after, beforeFingerprint: current.fingerprint, afterFingerprint: transactionFingerprint(current.context, after),
+      expectedCategory, featureKey: featureKey(current.context, before), decision
+    }, { identity, job, config: this.config, policyHash });
+    return { status: 'executed', operation: await this.executeReserved(reserved.operationId, reserved.proposal, { identity, current }) };
   }
   async undo(operationId, { identity, job }) {
     this.store.assertIdentity(identity);

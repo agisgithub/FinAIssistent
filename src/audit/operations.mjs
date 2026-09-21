@@ -9,7 +9,7 @@ export function validBackupReference(ref, kind, operationId) {
   return ref && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(ref.id) && ref.kind === kind && ref.operationId === operationId && /^[a-f0-9]{64}$/.test(ref.sha256) && Number.isSafeInteger(ref.bytes) && ref.bytes >= 40 && ref.bytes <= 512 * 1024 * 1024 + 4096 && typeof ref.createdAt === 'string' && Number.isFinite(Date.parse(ref.createdAt));
 }
 const json = value => { const result = JSON.stringify(value); if (Buffer.byteLength(result) > 65536) throw new AppError('INPUT_INVALID'); return result; };
-const decode = row => row ? { ...row, before: row.before_json ? JSON.parse(row.before_json) : null, after: row.after_json ? JSON.parse(row.after_json) : null, display: row.display_json ? JSON.parse(row.display_json) : null, reason: row.reason_json ? JSON.parse(row.reason_json) : null, expectedCategory: row.expected_category_json ? JSON.parse(row.expected_category_json) : null } : null;
+const decode = row => row ? { ...row, before: row.before_json ? JSON.parse(row.before_json) : null, after: row.after_json ? JSON.parse(row.after_json) : null, display: row.display_json ? JSON.parse(row.display_json) : null, reason: row.reason_json ? JSON.parse(row.reason_json) : null, expectedCategory: row.expected_category_json ? JSON.parse(row.expected_category_json) : null, decision: row.decision_json ? JSON.parse(row.decision_json) : null } : null;
 export function policyHash(config) {
   return createHash('sha256').update(json({ version: POLICY_VERSION, origin: 'telegram-category-v1', householdId: config.householdId, budgetId: config.actual.budgetId, serverURL: config.actual.serverURL, dryRun: config.dryRun, backupKeyRef: config.backup?.keyRef ?? null, rules: config.categorization?.rules ?? [], ttl: PROPOSAL_TTL_MS, patch: ['category'], externalProviders: config.privacy.externalProviders })).digest('hex');
 }
@@ -59,8 +59,8 @@ export class OperationJournal {
       if (p.kind === 'undo' && this.latestTargetOperation(p.target_id)?.id !== p.undo_of) throw new AppError('UNDO_UNAVAILABLE');
       const operationId = randomUUID(), now = this.store.now();
       this.db.prepare("UPDATE proposals SET state='approved',consumed_at=? WHERE id=? AND state='pending'").run(now, p.id);
-      this.db.prepare(`INSERT INTO operations(id,household_id,budget_id,kind,state,created_at,updated_at,proposal_id,confirmation_job_id,policy_hash,dry_run,undo_of)
-        VALUES (?,?,?,?,'reserved',?,?,?,?,?,?,?)`).run(operationId, identity.householdId, identity.budgetId, p.kind, now, now, p.id, job.id, p.policy_hash, p.dry_run, p.undo_of);
+      this.db.prepare(`INSERT INTO operations(id,household_id,budget_id,kind,state,created_at,updated_at,proposal_id,confirmation_job_id,policy_hash,dry_run,undo_of,origin,feature_key,decision_json)
+        VALUES (?,?,?,?,'reserved',?,?,?,?,?,?,?,'telegram_confirmation',?,NULL)`).run(operationId, identity.householdId, identity.budgetId, p.kind, now, now, p.id, job.id, p.policy_hash, p.dry_run, p.undo_of, p.feature_key);
       this.db.prepare("INSERT INTO operation_items(operation_id,target_id,before_json,after_json,state,before_fingerprint,after_fingerprint) VALUES (?,?,?,?,'reserved',?,?)").run(operationId, p.target_id, p.before_json, p.after_json, p.before_fingerprint, p.after_fingerprint);
       this.db.prepare('UPDATE jobs SET safe_retry=0,updated_at=? WHERE id=?').run(now, job.id);
       if (!p.dry_run) {
@@ -70,6 +70,25 @@ export class OperationJournal {
       this.event(operationId, 'approval_consumed', { proposalId: p.id, policyHash: p.policy_hash, beforeFingerprint: p.before_fingerprint, afterFingerprint: p.after_fingerprint });
       this.store.enqueueOutbox(withActionMetadata({ text: `Aprovação recebida. Operação ${operationId} em processamento${p.dry_run ? ' (simulação)' : ''}. Aguarde a verificação do resultado.`, dedupeKey: `operation-start:${operationId}` }, { reason: 'approval_received' }));
       return { proposal: p, operationId };
+    });
+  }
+  reserveAutomatic(input, { identity, job, config, policyHash }) {
+    return this.store.transaction(() => {
+      this.assertJob(job, identity);
+      if (config.dryRun !== false || config.companion?.transactionMonitorEnabled !== true || config.companion?.autoCategorizeHighConfidence !== true || !config.backup?.keyRef) throw new AppError('PROPOSAL_POLICY_CHANGED');
+      const observation = this.db.prepare(`SELECT * FROM transaction_observations WHERE household_id=? AND budget_id=? AND transaction_id=? AND job_id=? AND state='auto_queued'`).get(identity.householdId, identity.budgetId, input.before.id, job.id);
+      if (!observation || observation.latest_fingerprint !== input.beforeFingerprint) throw new AppError('MUTATION_CONFLICT');
+      if (this.db.prepare('SELECT 1 FROM operations WHERE confirmation_job_id=?').get(job.id)) throw new AppError('STORAGE_FAILED');
+      const operationId = randomUUID(), now = this.store.now(), decisionJson = json(input.decision);
+      this.db.prepare(`INSERT INTO operations(id,household_id,budget_id,kind,state,created_at,updated_at,confirmation_job_id,policy_hash,dry_run,origin,feature_key,decision_json)
+        VALUES (?,?,?,'category','reserved',?,?,?,?,0,'companion_high_confidence',?,?)`).run(operationId, identity.householdId, identity.budgetId, now, now, job.id, policyHash, input.featureKey, decisionJson);
+      this.db.prepare("INSERT INTO operation_items(operation_id,target_id,before_json,after_json,state,before_fingerprint,after_fingerprint) VALUES (?,?,?,?,'reserved',?,?)").run(operationId, input.before.id, json(input.before), json(input.after), input.beforeFingerprint, input.afterFingerprint);
+      this.db.prepare('UPDATE jobs SET safe_retry=0,updated_at=? WHERE id=?').run(now, job.id);
+      this.db.prepare('UPDATE category_examples SET active=0 WHERE household_id=? AND budget_id=? AND target_id=?').run(identity.householdId, identity.budgetId, input.before.id);
+      this.db.prepare("INSERT INTO operation_target_order(household_id,budget_id,target_id,operation_id,operation_kind) VALUES(?,?,?,?,'category')").run(identity.householdId, identity.budgetId, input.before.id, operationId);
+      this.db.prepare("UPDATE transaction_observations SET operation_id=?,decision_json=?,last_seen_at=? WHERE household_id=? AND budget_id=? AND transaction_id=? AND job_id=? AND state='auto_queued'").run(operationId, decisionJson, now, identity.householdId, identity.budgetId, input.before.id, job.id);
+      this.event(operationId, 'automatic_decision_reserved', { origin: 'companion_high_confidence', policyHash, beforeFingerprint: input.beforeFingerprint, afterFingerprint: input.afterFingerprint, decision: input.decision });
+      return { operationId, proposal: { target_id: input.before.id, before_fingerprint: input.beforeFingerprint, after_fingerprint: input.afterFingerprint, before: input.before, after: input.after, expectedCategory: input.expectedCategory, dry_run: 0 } };
     });
   }
   cancel(nonce, identity) {
@@ -97,14 +116,15 @@ export class OperationJournal {
       const safeCode = code == null ? null : ERROR_CODES.has(code) ? code : 'MUTATION_UNCERTAIN';
       this.db.prepare('UPDATE operations SET state=?,initial_outcome=?,error_code=?,actual_backup_ref=?,updated_at=? WHERE id=?').run(state, state, safeCode, actualBackupRef == null ? null : json(actualBackupRef), this.store.now(), operationId);
       this.db.prepare('UPDATE operation_items SET state=? WHERE operation_id=?').run(state, operationId);
-      if (state === 'applied' && !op.dry_run) {
+      if (state === 'applied' && !op.dry_run && op.origin !== 'companion_high_confidence') {
         if (op.kind === 'undo') this.db.prepare('UPDATE category_examples SET active=0 WHERE household_id=? AND budget_id=? AND target_id=?').run(op.household_id, op.budget_id, op.target_id);
         else {
           const p = this.db.prepare('SELECT feature_key FROM proposals WHERE id=?').get(op.proposal_id);
           this.db.prepare('UPDATE category_examples SET active=0 WHERE household_id=? AND budget_id=? AND target_id=?').run(op.household_id, op.budget_id, op.target_id);
-          if (p.feature_key && op.after.categoryId != null) this.db.prepare('INSERT INTO category_examples(operation_id,household_id,budget_id,target_id,feature_key,category_id,active,created_at) VALUES (?,?,?,?,?,?,1,?)').run(operationId, op.household_id, op.budget_id, op.target_id, p.feature_key, op.after.categoryId, this.store.now());
+          if ((op.feature_key ?? p?.feature_key) && op.after.categoryId != null) this.db.prepare('INSERT INTO category_examples(operation_id,household_id,budget_id,target_id,feature_key,category_id,active,created_at) VALUES (?,?,?,?,?,?,1,?)').run(operationId, op.household_id, op.budget_id, op.target_id, op.feature_key ?? p.feature_key, op.after.categoryId, this.store.now());
         }
       }
+      if (op.origin === 'companion_high_confidence') this.db.prepare('UPDATE transaction_observations SET state=?,last_seen_at=? WHERE operation_id=?').run(state, this.store.now(), operationId);
       this.event(operationId, `operation_${state}`, { code: safeCode });
       const finished = this.operation(operationId);
       const finalMessage = withActionMetadata(renderOperation(finished), { reason: 'operation_result', durationMs, failure: safeCode });
@@ -155,6 +175,7 @@ export function recoverOperations(store) {
   for (const row of rows) {
     store.db.prepare("UPDATE operations SET state='uncertain',initial_outcome='uncertain',error_code='MUTATION_UNCERTAIN',updated_at=? WHERE id=?").run(store.now(), row.id);
     store.db.prepare("UPDATE operation_items SET state='uncertain' WHERE operation_id=?").run(row.id);
+    store.db.prepare("UPDATE transaction_observations SET state='uncertain',last_seen_at=? WHERE operation_id=?").run(store.now(), row.id);
     journal.event(row.id, 'restart_uncertain');
     store.enqueueOutbox({ ...withActionMetadata(renderOperation(journal.operation(row.id)), { reason: 'operation_recovery', failure: 'MUTATION_UNCERTAIN' }), dedupeKey: `operation-result:${row.id}:0` });
   }
@@ -167,6 +188,7 @@ export function pruneOperations(store, retentionDays) {
     WHERE created_at<? AND state<>'pending' AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.proposal_id=proposals.id AND o.state IN ('uncertain','reserved','executing','verified'))`).run(cutoff);
   store.db.prepare(`UPDATE operation_items SET before_json=NULL,after_json=NULL WHERE operation_id IN
     (SELECT id FROM operations WHERE updated_at<? AND state IN ('applied','failed_before','simulated','observed_after','observed_before'))`).run(cutoff);
+  store.db.prepare("UPDATE operations SET decision_json=NULL WHERE updated_at<? AND state IN ('applied','failed_before','simulated','observed_after','observed_before')").run(cutoff);
   store.db.prepare('UPDATE category_examples SET active=0,target_id=NULL,feature_key=NULL,category_id=NULL WHERE created_at<?').run(cutoff);
   store.db.prepare(`UPDATE audit_events SET payload='{"redacted":true}' WHERE created_at<? AND (operation_id IS NULL OR operation_id IN
     (SELECT id FROM operations WHERE state IN ('applied','failed_before','simulated','observed_after','observed_before')))`).run(cutoff);

@@ -16,6 +16,9 @@ import { ReportScheduler } from './jobs/scheduler.mjs';
 import { BillService } from './application/bills.mjs';
 import { BillScheduler } from './jobs/bill-scheduler.mjs';
 import { Schedulers } from './jobs/schedulers.mjs';
+import { TransactionMonitorScheduler } from './jobs/transaction-monitor.mjs';
+import { CategorizationActions } from './application/actions.mjs';
+import { CompanionService } from './companion/service.mjs';
 
 export async function main({ config: injectedConfig, actual: injectedActual, telegram: injectedTelegram, signal: injectedSignal, logger = createLogger(), handlerFactory = createCommandHandler } = {}) {
   process.umask(0o077);
@@ -38,8 +41,11 @@ export async function main({ config: injectedConfig, actual: injectedActual, tel
     actual = injectedActual ?? new ActualClient(config);
     const billService = new BillService({ config, store, actual });
     const reportScheduler = new ReportScheduler({ config, store, actual, upcomingProvider: options => billService.getUpcoming(options) });
-    const scheduler = new Schedulers([reportScheduler,new BillScheduler({ config, store, service: billService })]);
-    const handler = handlerFactory({ config, store, actual, reportScheduler, billService });
+    const actionService = new CategorizationActions({ config, store, actual });
+    const companionService = new CompanionService({ config, store, now: () => new Date(store.now()) });
+    const transactionMonitor = new TransactionMonitorScheduler({ config, store, actual, actions: actionService, companionService });
+    const scheduler = new Schedulers([reportScheduler,new BillScheduler({ config, store, service: billService }),transactionMonitor]);
+    const handler = handlerFactory({ config, store, actual, reportScheduler, billService, actionService, companionService, transactionMonitor });
     logger('started');
     await runLoops({ config, store, handler, telegram, logger, scheduler, signal });
   } finally {
