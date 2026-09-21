@@ -6,10 +6,15 @@
   "secretDir": "/run/secrets",
   "telegram": { "userId": 123456789, "chatId": 123456789, "tokenRef": "telegram-token" },
   "actual": {
-    "serverURL": "http://host.docker.internal:5006",
-    "budgetId": "REPLACE_WITH_SYNC_ID",
-    "passwordRef": "actual-password",
-    "encryptionPasswordRef": null
+    "defaultBase": "principal",
+    "bases": {
+      "principal": {
+        "serverURL": "http://host.docker.internal:5006",
+        "budgetId": "REPLACE_WITH_SYNC_ID",
+        "passwordRef": "actual-password",
+        "encryptionPasswordRef": null
+      }
+    }
   },
   "privacy": { "externalProviders": false },
   "assistant": { "enabled": true, "defaultProvider": "ollama", "historyTtlMinutes": 1440, "maxTurns": 12, "maxToolRounds": 4, "maxToolCalls": 8, "maxContextChars": 24000, "maxToolResultChars": 8000, "outputTokens": 1024 },

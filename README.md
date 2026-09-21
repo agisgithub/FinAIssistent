@@ -4,7 +4,7 @@ Assistente financeiro pessoal pelo Telegram, com Actual Budget como fonte dos da
 
 ## Marco atual
 
-O projeto reúne as fases 0 a 1D, 2 e o companheiro financeiro 3A/3B: um responsável, uma residência, um orçamento, consultas financeiras em centavos, categorização confirmada, memórias e metas declaradas, monitor opcional de novos gastos, relatórios/alertas opcionais e calendário mensal de contas por unidade. A fila, as mensagens, as propostas, as operações, as memórias, as metas e o calendário ficam no SQLite. O SDK Actual funciona em um worker exclusivo. Comandos, relatórios e alertas usam regras locais; a conversa pode consultar ferramentas e preparar propostas, com Ollama como padrão e Gemini por escolha explícita.
+O projeto reúne as fases 0 a 1D, 2 e o companheiro financeiro 3A/3B/3C: um responsável, uma residência e perfis isolados de orçamento Actual, com uma base ativa por conversa. Há consultas financeiras em centavos, categorização confirmada, memórias e metas declaradas, monitor opcional de novos gastos, relatórios/alertas opcionais e calendário mensal de contas por unidade. Cada perfil mantém fila, mensagens, propostas, operações, memórias, metas, calendário, cache e worker Actual próprios. Comandos, relatórios e alertas usam regras locais; a conversa pode consultar ferramentas e preparar propostas, com Ollama como padrão e Gemini por escolha explícita.
 
 Unidades, recorrências e registros manuais de pagamento exigem confirmação no Telegram. Lembretes de datas cadastradas e consultas ao calendário funcionam mesmo sem Actual ou modelo disponíveis. E-mail, cofre e portais ficam fora deste marco; não há execução de pagamento bancário. [Escopo e provas](docs/scope.md).
 
@@ -41,6 +41,8 @@ npm test
 
 Copie `config.example.json` para `config.json`. Substitua os IDs do responsável/chat e o Sync ID do orçamento Actual. Crie os arquivos de segredo `telegram-token` e `actual-password` na pasta `secrets`, acessíveis somente ao usuário que executa o processo. Crie também `data/actual`, gravável por esse usuário. Se o orçamento usar criptografia, configure `encryptionPasswordRef` com outro arquivo. Não coloque o conteúdo desses arquivos no JSON.
 
+Para acrescentar uma base já configurada em outro projeto sem imprimir seu Sync ID, pare o bot e use `node scripts/add-actual-base.mjs --config config.json --source /home/agis/finaig/config.json --alias financa-hml2 --server-url http://127.0.0.1:5007`. Esse endereço pressupõe o `compose.override.yaml` atual com `network_mode: host`; não troque por `host.docker.internal` nesse ambiente. Os dois arquivos precisam ser regulares e privados. O utilitário copia somente o identificador do orçamento e reutiliza a referência de senha do perfil principal; nenhum servidor Actual é criado.
+
 ```sh
 npm run preflight
 npm start
@@ -53,6 +55,9 @@ Inicie somente se o pré-teste passar. Ele verifica configuração, segredos e a
 | Comando | Resultado neste marco |
 | --- | --- |
 | `/status` | Estado local, última leitura e contagem de entregas/operações incertas |
+| `/bases` | Perfis Actual configurados, sem revelar Sync IDs ou credenciais |
+| `/base` | Perfil ativo para as próximas mensagens |
+| `/base usar <alias>` | Troca atomicamente o perfil das mensagens futuras |
 | `/ia`, `/ia ollama`, `/ia gemini` | Provedor da conversa; Gemini exige aviso e confirmação de contexto |
 | `/ia modelos`, `/ia modelo ID`, `/ia limpar` | Modelos disponíveis, escolha e limpeza da memória ativa |
 | `/gemini pergunta` | Pergunta remota única, após confirmação; conserva o provedor padrão |

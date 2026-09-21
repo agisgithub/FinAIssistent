@@ -6,6 +6,7 @@ import { loadConfig } from './config.mjs';
 import { configDiagnostic } from './config-diagnostics.mjs';
 import { secretResolver } from './secrets/resolver.mjs';
 import { errorCode } from './errors.mjs';
+import { actualProfiles } from './actual/base-registry.mjs';
 
 // Offline operator check. No SDK, database, HTTP, bot polling or financial write.
 // A new, uniquely named probe is the only file written and is always removed.
@@ -42,20 +43,37 @@ export async function preflight(filename) {
     checks.push({ check: 'directory', field, status: reason ? 'failed' : 'ok', ...(reason ? { reason } : {}) });
   };
   await checkedDirectory('dataDir', config.dataDir, { writable: true });
-  await checkedDirectory('dataDir.actual', path.join(config.dataDir, 'actual'), { writable: true });
+  const profiles = actualProfiles(config);
+  for (const profile of profiles) {
+    const suffix = profiles.length === 1 && profile.alias === 'principal' ? 'actual' : `actual.bases.${profile.alias}`;
+    if (profile.config.dataDir !== config.dataDir) {
+      const reason = await directoryCheck(profile.config.dataDir, { writable: true });
+      checks.push({ check: 'directory', field: `${suffix}.dataDir`, status: reason && reason !== 'directory_missing' ? 'failed' : 'ok', ...(reason && reason !== 'directory_missing' ? { reason } : {}) });
+    }
+    const cacheReason = await directoryCheck(path.join(profile.config.dataDir, 'actual'), { writable: true });
+    const cacheMayBeCreated = profile.config.dataDir !== config.dataDir && cacheReason === 'directory_missing';
+    checks.push({ check: 'directory', field: suffix === 'actual' ? 'dataDir.actual' : `${suffix}.cache`, status: cacheReason && !cacheMayBeCreated ? 'failed' : 'ok', ...(cacheReason && !cacheMayBeCreated ? { reason: cacheReason } : {}) });
+  }
   await checkedDirectory('secretDir', config.secretDir);
   if (config.backup.keyRef || !config.dryRun) {
-    // The runtime creates a missing backup directory within the checked dataDir.
-    const backupDir = path.join(config.dataDir, 'backups');
-    const reason = await directoryCheck(backupDir, { writable: true, privateBackup: true });
-    checks.push({ check: 'directory', field: 'dataDir.backups', status: reason && reason !== 'directory_missing' ? 'failed' : 'ok',
-      ...(reason && reason !== 'directory_missing' ? { reason } : {}) });
+    for (const profile of profiles) {
+      // The runtime creates a missing private backup directory inside each
+      // already confined profile data directory.
+      const backupDir = path.join(profile.config.dataDir, 'backups');
+      const reason = await directoryCheck(backupDir, { writable: true, privateBackup: true });
+      checks.push({ check: 'directory', field: profiles.length === 1 && profile.alias === 'principal' ? 'dataDir.backups' : `actual.bases.${profile.alias}.backups`, status: reason && reason !== 'directory_missing' ? 'failed' : 'ok',
+        ...(reason && reason !== 'directory_missing' ? { reason } : {}) });
+    }
   }
   const resolveSecret = secretResolver(config.secretDir);
   const references = [
     ['telegram.tokenRef', config.telegram.tokenRef, value => /^\d+:[A-Za-z0-9_-]+$/.test(value)],
-    ['actual.passwordRef', config.actual.passwordRef, () => true],
-    ...(config.actual.encryptionPasswordRef ? [['actual.encryptionPasswordRef', config.actual.encryptionPasswordRef, () => true]] : []),
+    ...profiles.flatMap(profile => {
+      const prefix = profiles.length === 1 && profile.alias === 'principal' ? 'actual' : `actual.bases.${profile.alias}`;
+      return [
+      [`${prefix}.passwordRef`, profile.config.actual.passwordRef, () => true],
+      ...(profile.config.actual.encryptionPasswordRef ? [[`${prefix}.encryptionPasswordRef`, profile.config.actual.encryptionPasswordRef, () => true]] : [])
+    ]; }),
     ...(config.backup.keyRef ? [['backup.keyRef', config.backup.keyRef, value => /^[a-fA-F0-9]{64}$/.test(value)]] : []),
     ...(config.gemini.enabled ? [['gemini.apiKeyRef', config.gemini.apiKeyRef, value => value.length <= 16384 && !/[\s\0]/.test(value)]] : [])
   ];

@@ -9,6 +9,7 @@ import { SetupCancelled } from './terminal.mjs';
 const fail = code => { throw new Error(code); };
 const reference = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(value);
 const isObject = value => value && typeof value === 'object' && !Array.isArray(value);
+const ACTUAL_LEAF_KEYS = Object.freeze(['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs']);
 async function entry(filename) { try { return await fs.lstat(filename); } catch (e) { if (e.code === 'ENOENT') return null; throw e; } }
 async function regular(filename, max = 32768) {
   const stat = await entry(filename);
@@ -56,6 +57,17 @@ export const setupFiles = { directory, regular, secretValue, yes, askValue };
 function prepareConfig(raw) {
   if (!isObject(raw) || !isObject(raw.telegram) || !isObject(raw.actual) || (raw.ollama != null && !isObject(raw.ollama))) fail('SETUP_CONFIG_STRUCTURE_INVALID');
   const config = structuredClone(raw);
+  let actualDefaultBase = null;
+  if (Object.hasOwn(config.actual, 'defaultBase') || Object.hasOwn(config.actual, 'bases')) {
+    const alias = config.actual.defaultBase, bases = config.actual.bases;
+    if (typeof alias !== 'string' || !isObject(bases) || !Object.hasOwn(bases, alias) || !isObject(bases[alias])) fail('SETUP_CONFIG_STRUCTURE_INVALID');
+    // Registry configs have one canonical source for each editable value. A
+    // compatibility leaf at the registry root is ambiguous and must be fixed
+    // manually instead of silently overriding the selected default profile.
+    if (ACTUAL_LEAF_KEYS.some(key => Object.hasOwn(config.actual, key))) fail('SETUP_CONFIG_STRUCTURE_INVALID');
+    actualDefaultBase = alias;
+    config.actual = { ...config.actual, ...structuredClone(bases[alias]) };
+  }
   if (config.dataDir != null && !['./data', '/data'].includes(config.dataDir)) fail('SETUP_CUSTOM_DATA_PATH_REQUIRES_MANUAL_SETUP');
   if (config.secretDir != null && !['./secrets', '/run/secrets'].includes(config.secretDir)) fail('SETUP_CUSTOM_SECRET_PATH_REQUIRES_MANUAL_SETUP');
   config.dataDir = '/data'; config.secretDir = '/run/secrets';
@@ -67,7 +79,14 @@ function prepareConfig(raw) {
     actual: { ...config.actual, serverURL: 'http://host.docker.internal:5006', budgetId: 'synthetic-budget' },
     ollama: { ...config.ollama, enabled: false, url: 'http://host.docker.internal:11434', model: null, localOnlyConfirmed: false }
   }, '/app');
-  return config;
+  return { config, actualDefaultBase, originalBudgetId: config.actual.budgetId };
+}
+
+function persistActualDefault(config, actualDefaultBase) {
+  if (actualDefaultBase == null) return;
+  const leaf = Object.fromEntries(ACTUAL_LEAF_KEYS.filter(key => Object.hasOwn(config.actual, key)).map(key => [key, config.actual[key]]));
+  const { defaultBase, bases } = config.actual;
+  config.actual = { defaultBase, bases: { ...bases, [actualDefaultBase]: leaf } };
 }
 
 // Every destination is a fixed configuration path or a previously validated
@@ -130,7 +149,7 @@ export async function runDockerSetup({ root = '/setup', io, owner = 1000, telegr
     let raw;
     try { raw = JSON.parse((originalConfig?.bytes ?? await fs.readFile(new URL('../../config.docker.example.json', import.meta.url))).toString('utf8').replace(/^\uFEFF/, '')); }
     catch { fail('SETUP_CONFIG_JSON_INVALID'); }
-    const config = prepareConfig(raw);
+    const { config, actualDefaultBase, originalBudgetId } = prepareConfig(raw);
     io.write('Assistente Docker: Enter mantém o valor existente; segredos ficam ocultos. Nada será substituído antes da confirmação final.');
     config.actual.serverURL = await askValue(io, 'URL do Actual acessível pelo container', safeURL(config.actual.serverURL, 'http://host.docker.internal:5006'));
     config.actual.budgetId = await askValue(io, 'Sync ID do orçamento Actual', /^[A-Za-z0-9_-]{1,128}$/.test(config.actual.budgetId ?? '') && !config.actual.budgetId.startsWith('REPLACE_') ? config.actual.budgetId : '');
@@ -210,10 +229,11 @@ export async function runDockerSetup({ root = '/setup', io, owner = 1000, telegr
       if (original && !/^[a-fA-F0-9]{64}$/.test(secretValue(original))) fail('SETUP_RESTORE_EXISTING_BACKUP_KEY');
       secrets.set(ref, { original, bytes: original?.bytes ?? Buffer.from(randomBytes(32).toString('hex') + '\n') });
     }
+    persistActualDefault(config, actualDefaultBase);
     const validated = validateConfig(config, '/app');
     io.write(`Resumo: Actual em ${new URL(validated.actual.serverURL).origin}; userId=${validated.telegram.userId}; chatId=${validated.telegram.chatId}.`);
     io.write(`Dados em /data; segredos em /run/secrets; Ollama ${validated.ollama.enabled ? 'ativado com confirmação local' : 'desativado'}; escrita Actual ${validated.dryRun ? 'em simulação' : 'habilitada com aprovação por operação'}.`);
-    if (originalConfig && ['householdId'].some(k => raw[k] !== config[k]) || originalConfig && (raw.actual.budgetId !== config.actual.budgetId || raw.telegram.userId !== config.telegram.userId || raw.telegram.chatId !== config.telegram.chatId || !secrets.get(config.telegram.tokenRef).bytes.equals(secrets.get(config.telegram.tokenRef).original?.bytes ?? Buffer.alloc(0)))) {
+    if (originalConfig && ['householdId'].some(k => raw[k] !== config[k]) || originalConfig && (originalBudgetId !== validated.actual.budgetId || raw.telegram.userId !== config.telegram.userId || raw.telegram.chatId !== config.telegram.chatId || !secrets.get(config.telegram.tokenRef).bytes.equals(secrets.get(config.telegram.tokenRef).original?.bytes ?? Buffer.alloc(0)))) {
       io.write('A identidade ou o token mudou. O volume existente conserva seus vínculos de residência/orçamento/responsável/bot; este assistente não redefine o banco.');
     }
     io.write('Ao salvar, configuração e segredos ficarão privados e acessíveis ao UID 1000. Uma cópia privada dos arquivos substituídos será preservada.');

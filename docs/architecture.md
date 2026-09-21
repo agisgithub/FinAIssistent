@@ -17,7 +17,7 @@ flowchart LR
   Outbox --> Telegram
 ```
 
-Polling, consumo de trabalhos, saída de mensagens e manutenção têm loops separados. Há um consumidor local de comandos e um executor Actual serial. Uma chamada lenta ao SDK não bloqueia a persistência de novas mensagens nem o tick/entrega de lembretes já conhecidos no calendário local. Erro fatal de loop cancela os demais antes de fechar o estado. A composição está em [main](../src/main.mjs) e no [runtime](../src/jobs/runtime.mjs).
+Polling, roteamento, consumo de trabalhos, saída de mensagens e manutenção têm loops separados. O Telegram é consultado uma vez; um ledger durável escolhe o perfil ativo e encaminha cada update para um runtime com SQLite, schedulers, cache e worker Actual exclusivos. A entrega é serializada globalmente entre perfis. Uma falha de integração em um perfil não bloqueia os demais, e um erro fatal do ledger cancela os loops antes de fechar todos os estados. A composição está em [main](../src/main.mjs), no [runtime multi-base](../src/jobs/multi-runtime.mjs) e no [router](../src/telegram/base-router.mjs).
 
 ## Interfaces de extensão
 

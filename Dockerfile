@@ -23,6 +23,7 @@ COPY src ./src
 COPY migrations ./migrations
 COPY scripts/health.mjs scripts/preflight.mjs scripts/telegram-info.mjs scripts/setup-docker.mjs ./scripts/
 COPY scripts/configure-ai.mjs ./scripts/
+COPY scripts/add-actual-base.mjs ./scripts/
 RUN mkdir -p /data/actual && chown -R node:node /data
 USER node
 HEALTHCHECK --interval=60s --timeout=5s --start-period=45s --retries=3 CMD ["node", "scripts/health.mjs"]

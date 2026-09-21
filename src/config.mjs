@@ -5,6 +5,7 @@ import { validateOllamaConfig } from './llm/config.mjs';
 import { validateAssistantConfig, validateGeminiConfig } from './llm/chat-config.mjs';
 import { validateCategorizationConfig } from './categorization/recommend.mjs';
 import { validateCompanionConfig } from './companion/config.mjs';
+import { actualSecretReferences, normalizeActualRegistry } from './actual/base-registry.mjs';
 
 function object(value, keys, field) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) bad(field, 'expected_object');
@@ -15,7 +16,8 @@ const id = value => Number.isSafeInteger(value) && value > 0;
 export function validateConfig(input, baseDir = process.cwd()) {
   object(input, ['householdId', 'timezone', 'currency', 'dataDir', 'secretDir', 'telegram', 'actual', 'privacy', 'dryRun', 'retentionDays', 'ollama', 'backup', 'categorization', 'assistant', 'gemini', 'companion'], 'config');
   object(input.telegram, ['userId', 'chatId', 'tokenRef'], 'telegram');
-  object(input.actual, ['serverURL', 'budgetId', 'passwordRef', 'encryptionPasswordRef', 'timeoutMs'], 'actual');
+  const actualRegistry = normalizeActualRegistry(input.actual);
+  const actual = actualRegistry.bases[actualRegistry.defaultBase];
   const privacy = input.privacy ?? { externalProviders: false };
   object(privacy, ['externalProviders'], 'privacy');
   if (typeof privacy.externalProviders !== 'boolean') bad('privacy.externalProviders', 'expected_boolean');
@@ -26,27 +28,17 @@ export function validateConfig(input, baseDir = process.cwd()) {
   if (!id(input.telegram.chatId)) bad('telegram.chatId', 'expected_positive_integer');
   if (input.telegram.userId !== input.telegram.chatId) bad('telegram.chatId', 'private_chat_must_match_user');
   if (!ref(input.telegram.tokenRef)) bad('telegram.tokenRef', 'invalid_secret_reference');
-  if (!ref(input.actual.passwordRef)) bad('actual.passwordRef', 'invalid_secret_reference');
-  if (input.actual.encryptionPasswordRef != null && !ref(input.actual.encryptionPasswordRef)) bad('actual.encryptionPasswordRef', 'invalid_secret_reference');
-  if (typeof input.actual.budgetId === 'string' && input.actual.budgetId.startsWith('REPLACE_')) bad('actual.budgetId', 'replace_placeholder');
-  if (typeof input.actual.budgetId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.actual.budgetId)) bad('actual.budgetId', 'invalid_identifier');
   const timezone = input.timezone ?? 'America/Sao_Paulo';
   if (typeof timezone !== 'string' || !timezone) bad('timezone', 'invalid_timezone');
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }).format(); } catch { bad('timezone', 'invalid_timezone'); }
   const currency = input.currency ?? 'BRL';
   if (currency !== 'BRL') bad('currency', 'only_brl_supported'); // One currency until a tested multi-currency contract exists.
-  let url;
-  if (typeof input.actual.serverURL !== 'string') bad('actual.serverURL', 'invalid_url');
-  try { url = new URL(input.actual.serverURL); } catch { bad('actual.serverURL', 'invalid_url'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) bad('actual.serverURL', 'unsafe_url');
-  const timeoutMs = input.actual.timeoutMs ?? 120000;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 300000) bad('actual.timeoutMs', 'integer_out_of_range');
   const dryRun = input.dryRun ?? true;
   if (typeof dryRun !== 'boolean') bad('dryRun', 'expected_boolean');
   const backup = input.backup ?? {};
   object(backup, ['keyRef'], 'backup');
   if (backup.keyRef != null && !ref(backup.keyRef)) bad('backup.keyRef', 'invalid_secret_reference');
-  if (gemini.enabled && [input.telegram.tokenRef,input.actual.passwordRef,input.actual.encryptionPasswordRef,backup.keyRef].includes(gemini.apiKeyRef)) bad('gemini.apiKeyRef', 'secret_references_must_be_distinct');
+  if (gemini.enabled && [input.telegram.tokenRef,...actualSecretReferences(input.actual),backup.keyRef].includes(gemini.apiKeyRef)) bad('gemini.apiKeyRef', 'secret_references_must_be_distinct');
   const retentionDays = input.retentionDays ?? 90;
   if (!Number.isSafeInteger(retentionDays) || retentionDays < 1 || retentionDays > 365) bad('retentionDays', 'integer_out_of_range');
   for (const [field, value] of [['dataDir', input.dataDir ?? './data'], ['secretDir', input.secretDir ?? './secrets']]) {
@@ -61,7 +53,7 @@ export function validateConfig(input, baseDir = process.cwd()) {
   return Object.freeze({
     householdId: input.householdId, timezone, currency, dataDir, secretDir, dryRun, retentionDays,
     telegram: Object.freeze({ ...input.telegram }),
-    actual: Object.freeze({ ...input.actual, serverURL: url.toString().replace(/\/$/, ''), timeoutMs }),
+    actual: Object.freeze({ ...actual, defaultBase: actualRegistry.defaultBase, bases: actualRegistry.bases }),
     privacy: Object.freeze({ externalProviders: privacy.externalProviders }),
     assistant, gemini, companion,
     backup: Object.freeze({ keyRef: backup.keyRef ?? null }),

@@ -29,12 +29,14 @@ export async function processOneJob({ store, handler, telegram, logger, schedule
   return true;
 }
 
-export async function processOneDelivery({ store, telegram, logger, scheduler }) {
+export async function processOneDelivery({ store, telegram, logger, scheduler, deliveryGate = null }) {
   scheduler?.tick();
+  if (deliveryGate && !deliveryGate.ready()) return false;
   const row = store.claimOutbox();
   if (!row) return false;
   try {
     if (scheduler && !scheduler.authorizeDelivery(row)) { store.finishOutbox(row.id, { state: 'failed' }); return true; }
+    deliveryGate?.reserve();
     let messageId;
     if (row.media_type === 'image/png' && row.media_blob) {
       try { messageId = await telegram.sendPhoto(row.chat_id, row.payload, { bytes: row.media_blob, filename: row.media_filename }); }
@@ -48,11 +50,32 @@ export async function processOneDelivery({ store, telegram, logger, scheduler })
     store.finishOutbox(row.id, { state: 'sent', messageId });
   } catch (error) {
     const code = errorCode(error, 'DELIVERY_UNCERTAIN');
-    if (code === 'TELEGRAM_RATE_LIMITED' && row.attempts < 5 && Number.isSafeInteger(error.retryAfterSeconds)) store.deferOutbox(row.id, error.retryAfterSeconds);
+    if (code === 'TELEGRAM_RATE_LIMITED' && row.attempts < 5 && Number.isSafeInteger(error.retryAfterSeconds)) {
+      store.deferOutbox(row.id, error.retryAfterSeconds);
+      deliveryGate?.defer(error.retryAfterSeconds);
+    }
     else store.finishOutbox(row.id, { state: ['TELEGRAM_REJECTED', 'TELEGRAM_RATE_LIMITED', 'UNAUTHORIZED', 'SECRET_UNAVAILABLE'].includes(code) ? 'failed' : 'uncertain', code });
     logger('delivery_failed', { code, integration: 'telegram' });
   }
   return true;
+}
+
+export class GlobalDeliveryGate {
+  constructor(store, { key = 'telegram_global_next_send_at', spacingMs = 1100 } = {}) {
+    if (!store?.db || !Number.isSafeInteger(spacingMs) || spacingMs < 1000 || spacingMs > 10000) throw new AppError('INPUT_INVALID');
+    this.store = store; this.key = key; this.spacingMs = spacingMs;
+  }
+  next() { return Number(this.store.db.prepare('SELECT value FROM metadata WHERE key=?').get(this.key)?.value ?? 0); }
+  ready() { return this.store.now() >= this.next(); }
+  until(value) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new AppError('INPUT_INVALID');
+    this.store.db.prepare("INSERT INTO metadata(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT)").run(this.key, String(value));
+  }
+  reserve() { this.until(this.store.now() + this.spacingMs); }
+  defer(seconds) {
+    if (!Number.isSafeInteger(seconds) || seconds < 1 || seconds > 3600) throw new AppError('INPUT_INVALID');
+    this.until(this.store.now() + seconds * 1000);
+  }
 }
 
 export async function runLoops({ config, store, handler, telegram, logger, scheduler, signal: outerSignal }) {

@@ -8,6 +8,7 @@ import { validateAssistantConfig, validateGeminiConfig } from '../llm/chat-confi
 import { validateOllamaConfig } from '../llm/config.mjs';
 import { commitSetup, setupFiles } from './wizard.mjs';
 import { SetupCancelled } from './terminal.mjs';
+import { actualSecretReferences } from '../actual/base-registry.mjs';
 
 const {directory,regular,secretValue,yes,askValue}=setupFiles;
 const fail=code=>{throw new Error(code);};
@@ -60,7 +61,7 @@ export async function runAISetup({root=process.cwd(),io,owner=process.getuid?.()
       io.write(GEMINI_PRIVACY_NOTICE);
       io.write('Crie uma chave de autorização atual no Google AI Studio (https://aistudio.google.com/api-keys). Faturamento é do projeto da API; uma assinatura Google pessoal não comprova esse estado.');
       gemini.apiKeyRef??='gemini-api-key';
-      const reserved=[config.telegram.tokenRef,config.actual.passwordRef,config.actual.encryptionPasswordRef,config.backup?.keyRef].filter(Boolean);
+      const reserved=[config.telegram.tokenRef,...actualSecretReferences(config),config.backup?.keyRef].filter(Boolean);
       if(!refOK(gemini.apiKeyRef)||reserved.includes(gemini.apiKeyRef)) fail('SETUP_SECRET_REFERENCES_MUST_BE_DISTINCT');
       const existing=await regular(path.join(secretRoot,gemini.apiKeyRef),16384);let saved;
       try{saved=secretValue(existing);}catch{saved=null;}

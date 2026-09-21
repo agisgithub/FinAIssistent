@@ -39,10 +39,12 @@ export function splitMessage(text, maxLength = 3900) {
 }
 
 export class StateStore {
-  constructor(filename, identity, { now = Date.now, conversationConfig = {} } = {}) {
+  constructor(filename, identity, { now = Date.now, conversationConfig = {}, baseKey = null } = {}) {
     this.identity = Object.freeze({ ...identity });
     this.now = now;
     this.conversationConfig = conversationConfig;
+    if (baseKey != null && (typeof baseKey !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,31}$/.test(baseKey) || ['constructor','prototype','__proto__'].includes(baseKey))) throw new AppError('INPUT_INVALID');
+    this.baseKey = baseKey;
     if (filename !== ':memory:') {
       mkdirSync(path.dirname(filename), { recursive: true, mode: 0o700 });
       if (process.platform !== 'win32') chmodSync(path.dirname(filename), 0o700);
@@ -133,7 +135,8 @@ export class StateStore {
       const row = this.db.prepare("SELECT * FROM jobs WHERE id=? AND household_id=? AND state='running'").get(jobId, this.identity.householdId);
       if (!row) throw new AppError('STORAGE_FAILED');
       if (message) {
-        const chunks = splitMessage(message.text, message.photo ? 1000 : 3900);
+        const footerLength = this.baseKey ? Buffer.byteLength(`\n\nBase: ${this.baseKey}`) : 0;
+        const chunks = splitMessage(message.text, message.photo ? 1024 - footerLength : 3900 - footerLength);
         for (let i = 0; i < chunks.length; i++) this.enqueueOutbox({ ...message, text: chunks[i], photo: i === 0 ? message.photo : undefined, replyMarkup: i === chunks.length - 1 ? message.replyMarkup : undefined, dedupeKey: `${message.dedupeKey ?? `job:${jobId}`}:${i}` });
       }
       this.db.prepare("UPDATE jobs SET state='done',updated_at=? WHERE id=?").run(this.now(), jobId);
@@ -151,9 +154,11 @@ export class StateStore {
       this.enqueueOutbox(withActionMetadata({ text: `Não foi possível concluir. Código: ${code}.`, dedupeKey: `job-error:${job.id}` }, { reason: 'command_error', failure: code }));
     });
   }
-  enqueueOutbox({ text, dedupeKey, chatId = this.identity.chatId, replyMarkup = undefined, photo = undefined }) {
+  enqueueOutbox({ text, dedupeKey, chatId = this.identity.chatId, replyMarkup = undefined, photo = undefined, suppressBaseFooter = false }) {
     if (!keyValid(dedupeKey)) throw new AppError('INPUT_INVALID');
-    if (chatId !== this.identity.chatId || typeof text !== 'string' || text.length < 1 || text.length > (photo ? 1024 : 4000)) throw new AppError('UNAUTHORIZED');
+    if (chatId !== this.identity.chatId || typeof text !== 'string' || text.length < 1 || typeof suppressBaseFooter !== 'boolean') throw new AppError('UNAUTHORIZED');
+    if (this.baseKey && !suppressBaseFooter) text += `\n\nBase: ${this.baseKey}`;
+    if (text.length > (photo ? 1024 : 4000)) throw new AppError('UNAUTHORIZED');
     const media = photo ? decodePngPhoto(photo) : null;
     const id = randomUUID();
     const changes = this.db.prepare("INSERT OR IGNORE INTO outbox(id,household_id,chat_id,dedupe_key,payload,state,available_at,created_at,updated_at,media_type,media_filename,media_blob) VALUES (?,?,?,?,?,'pending',?,?,?,?,?,?)")

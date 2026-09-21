@@ -75,6 +75,27 @@ test('rerun Enter preserves references, secret bytes, unrelated settings and bac
   const backups = await fs.readdir(path.join(root, '.setup-private', 'backups'));
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, '.setup-private', 'backups', backups[0], 'config.json'), 'utf8')), config);
 });
+test('multi-base rerun edits only the default leaf and preserves custom references and the second base', async t => {
+  const legacy = inputConfig().actual;
+  const principal = { ...legacy, passwordRef: 'custom-password', encryptionPasswordRef: 'custom-encryption-password', timeoutMs: 130000 };
+  const hml = { serverURL: 'http://host.docker.internal:5007', budgetId: 'hml-budget', passwordRef: 'hml-custom-password', encryptionPasswordRef: 'hml-encryption-password', timeoutMs: 140000 };
+  const config = { ...inputConfig(), actual: { defaultBase: 'principal', bases: { principal, 'financa-hml2': hml } } };
+  const root = await fixture(t, config);
+  await fs.rename(path.join(root, 'secrets', 'actual-password'), path.join(root, 'secrets', 'custom-password'));
+  await fs.writeFile(path.join(root, 'secrets', 'custom-encryption-password'), 'ENCRYPTION_CANARY\n', { mode: 0o600 });
+  const io = fakeIO(['http://host.docker.internal:5010', 'principal-updated', '', '', '', '', '', 's', '', '', 's']);
+  assert.equal((await runDockerSetup({ root, io, owner, telegramInfo: info })).status, 'saved');
+  assert.equal(io.pending.length, 0);
+  const saved = JSON.parse(await fs.readFile(path.join(root, 'config.json'), 'utf8'));
+  assert.deepEqual(Object.keys(saved.actual).sort(), ['bases', 'defaultBase']);
+  assert.equal(saved.actual.defaultBase, 'principal');
+  assert.deepEqual(saved.actual.bases.principal, { ...principal, serverURL: 'http://host.docker.internal:5010', budgetId: 'principal-updated' });
+  assert.deepEqual(saved.actual.bases['financa-hml2'], hml);
+  assert.equal(await fs.readFile(path.join(root, 'secrets', 'custom-password'), 'utf8'), password + '\n');
+  assert.equal(await fs.readFile(path.join(root, 'secrets', 'custom-encryption-password'), 'utf8'), 'ENCRYPTION_CANARY\n');
+  assert.doesNotThrow(() => validateConfig(saved));
+  assert.doesNotMatch(JSON.stringify(io.transcript), /CANARY/);
+});
 test('writing opt-in generates a key once and preserves it on rerun', async t => {
   const root = tempDirectory(t), io = fakeIO(freshAnswers('s', 's'));
   assert.equal((await runDockerSetup({ root, io, owner, telegramInfo: info })).status, 'saved');
