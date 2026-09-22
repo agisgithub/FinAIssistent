@@ -121,6 +121,28 @@ test('abbreviated selection fields retain explicit limits in the tool result and
   assert.match(context.content, /textTruncatedFields/); assert.match(context.content, /não representam a descrição completa/);
 });
 
+test('free model narrative is shortened without removing or duplicating authoritative financial rows', async t => {
+  let round = 0;
+  const rows = Array.from({ length: 6 }, (_, index) => ({ ...transaction(`tx-${index + 1}`), payee: `MARCADOR_${index + 1}` }));
+  const f = fixture(t, { tools: async () => search(rows), providers: { complete: async () => ++round === 1
+    ? answer('', [call('search_transactions', { start: TODAY, end: TODAY })])
+    : answer('NARRATIVA '.repeat(300)) } });
+  const result = await f.send('Liste e explique as compras encontradas');
+  assert.match(result.response.text, /Resposta resumida/);
+  for (let index = 1; index <= 6; index++) assert.equal(result.response.text.match(new RegExp(`MARCADOR_${index}`, 'g'))?.length, 1);
+  assert.ok(result.response.text.indexOf('NARRATIVA') < result.response.text.indexOf('MARCADOR_1'));
+});
+
+test('an exact model echo of authoritative tool text is emitted only once', async t => {
+  let round = 0;
+  const authoritative = ['TOTAL AUTORITATIVO', ...Array.from({ length: 12 }, (_, index) => `Linha ${index + 1}: R$ ${(index + 1) * 10},00`)].join('\n');
+  const f = fixture(t, { providers: { complete: async () => ++round === 1
+    ? answer('', [call('query_finances', { command: '/resumo' })])
+    : answer(authoritative) }, tools: async () => ({ data: { kind: 'financial_query', text: authoritative }, message: { text: authoritative } }) });
+  const result = await f.send('Resuma os dados');
+  assert.equal(result.response.text, authoritative);
+});
+
 test('a selected Gemini disabled in configuration never falls through to the legacy Ollama interpreter', async t => {
   for (const setting of ['enabled', 'externalProviders']) {
     const f = fixture(t);

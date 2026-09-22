@@ -82,8 +82,9 @@ O SDK 26.9.0 é carregado com uma transformação restrita em memória que imped
 | `BILL_EVIDENCE_STALE` | Releia catálogo/histórico e revise os IDs; suporte antigo não autoriza confirmar a proposta |
 | `CHAT_CONTEXT_LIMIT` | O corpo completo excedeu o contexto. Limpe histórico com `/ia limpar`, refine a consulta ou configure modelo com maior capacidade; não remova filtros para forçar resposta |
 | `OLLAMA_MODEL_UNSAFE` | Confira GGUF local, `tools`, contexto e cloud desativado; `/ia modelos` lista apenas os candidatos aprovados |
-| `GEMINI_REJECTED` / `GEMINI_RATE_LIMITED` | Confira chave de autorização, disponibilidade do modelo, projeto/billing/cotas no AI Studio; não existe fallback remoto nem retry automático |
-| `GEMINI_TIMEOUT` / `GEMINI_UNAVAILABLE` | Consulta não concluída. Pode ter consumido cota; tente novamente conscientemente ou escolha Ollama |
+| `GEMINI_AUTH_FAILED` | A credencial instalada não foi aceita como chave da Gemini API; substitua o secret por uma chave atual do AI Studio e mantenha permissão `0600` |
+| `GEMINI_REJECTED` / `GEMINI_RATE_LIMITED` | Confira disponibilidade do modelo, projeto/billing/cotas no AI Studio; 429 recebe duas retentativas curtas no mesmo modelo, sem troca de provedor |
+| `GEMINI_TIMEOUT` / `GEMINI_UNAVAILABLE` | Consulta não concluída após o prazo ou as retentativas disponíveis. Pode ter consumido cota; tente novamente conscientemente ou escolha Ollama |
 | `CHAT_INVALID_RESPONSE` | Corpo inválido, resultado incompleto ou contrato incompatível; nenhuma ferramenta parcial foi aceita |
 | `PROPOSAL_EXPIRED` / `PROPOSAL_USED` / `PROPOSAL_POLICY_CHANGED` | Prepare outra proposta após conferir os dados e a configuração; não reutilize o código |
 

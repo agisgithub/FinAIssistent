@@ -36,6 +36,7 @@ test('Ollama verifies local inventory and tools capability before transmitting a
     await assert.rejects(client.complete({provider:'ollama',messages,tools:[tool]}),/OLLAMA_MODEL_UNSAFE/);
     assert.equal(fake.calls.some(c=>c.url.endsWith('/api/chat')),false);assert.equal(JSON.stringify(fake.calls).includes('Mostre gastos'),false);
   }
+  await assert.rejects(new ChatProviders(config(),{fetchImpl:async()=>new Response('blocked',{status:401})}).listModels({provider:'ollama'}),e=>e.code==='OLLAMA_UNAVAILABLE');
 });
 test('Ollama tool round uses native message including thinking and correlates bounded tool result',async()=>{
   const raw={role:'assistant',content:'',thinking:'PRIVATE_THINKING',tool_calls:[{function:{index:0,name:tool.name,arguments:{command:'/resumo'}}}]};
@@ -116,10 +117,26 @@ test('bounded body and deadline include a stalled response reader; errors never 
   await assert.rejects(oversize.complete({provider:'gemini',messages}),e=>e.code==='CHAT_INVALID_RESPONSE'&&!JSON.stringify(e).includes('CANARY'));
   const stalled=new ChatProviders({...c,gemini:{...c.gemini,timeoutMs:1000}},{resolveSecret:async()=> 'SECRET_CANARY',fetchImpl:async()=>new Response(new ReadableStream({start(){}}))});
   await assert.rejects(stalled.complete({provider:'gemini',messages}),/GEMINI_TIMEOUT/);
-  const error=new ChatProviders(c,{resolveSecret:async()=> 'SECRET_CANARY',fetchImpl:async()=>{throw Error('SECRET_CANARY');}});await assert.rejects(error.complete({provider:'gemini',messages}),e=>e.code==='GEMINI_UNAVAILABLE'&&!JSON.stringify(e).includes('CANARY'));
+  const error=new ChatProviders(c,{resolveSecret:async()=> 'SECRET_CANARY',sleepImpl:async()=>{},fetchImpl:async()=>{throw Error('SECRET_CANARY');}});await assert.rejects(error.complete({provider:'gemini',messages}),e=>e.code==='GEMINI_UNAVAILABLE'&&!JSON.stringify(e).includes('CANARY'));
 });
-test('no automatic retry or remote fallback on rate limits, blocked input or unavailable provider',async()=>{
-  for(const [status,code] of [[429,'GEMINI_RATE_LIMITED'],[403,'GEMINI_REJECTED'],[503,'GEMINI_UNAVAILABLE']]) {let n=0;const client=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',fetchImpl:async()=>{n++;return new Response('CANARY',{status});}});await assert.rejects(client.complete({provider:'gemini',messages}),e=>e.code===code);assert.equal(n,1);}
+test('Gemini retries bounded transient responses without changing provider or model',async()=>{
+  let generations=0;const delays=[];
+  const client=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',sleepImpl:async milliseconds=>delays.push(milliseconds),fetchImpl:async url=>{
+    if(!url.endsWith(':generateContent')) return response(modelInfo);
+    generations++; if(generations<3) return new Response('CANARY',{status:503});
+    return response({candidates:[{finishReason:'STOP',content:{role:'model',parts:[{text:'OK'}]}}]});
+  }});
+  const result=await client.complete({provider:'gemini',messages});
+  assert.equal(result.text,'OK');assert.equal(result.provider,'gemini');assert.equal(result.model,'gemini-3.8-flash');assert.equal(generations,3);assert.deepEqual(delays,[250,750]);
+});
+test('Gemini exhausts rate-limit retries, but authentication and blocked input are never retried',async()=>{
+  let generations=0;const limited=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',sleepImpl:async()=>{},fetchImpl:async url=>{
+    if(!url.endsWith(':generateContent')) return response(modelInfo); generations++; return new Response('CANARY',{status:429});
+  }});
+  await assert.rejects(limited.complete({provider:'gemini',messages}),e=>e.code==='GEMINI_RATE_LIMITED');assert.equal(generations,3);
+  let timeouts=0;const requestTimeout=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',sleepImpl:async()=>{},fetchImpl:async()=>{timeouts++;return new Response('CANARY',{status:408});}});
+  await assert.rejects(requestTimeout.listModels({provider:'gemini'}),e=>e.code==='GEMINI_UNAVAILABLE');assert.equal(timeouts,3);
+  for(const [status,code] of [[401,'GEMINI_AUTH_FAILED'],[403,'GEMINI_REJECTED']]) {let n=0;const client=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',sleepImpl:async()=>assert.fail('non-transient response slept'),fetchImpl:async()=>{n++;return new Response('CANARY',{status});}});await assert.rejects(client.complete({provider:'gemini',messages}),e=>e.code===code);assert.equal(n,1);}
 });
 test('model lists filter generateContent and local/cloud models; pagination stays on fixed host',async()=>{
   const calls=[];const client=new ChatProviders(geminiConfig(),{resolveSecret:async()=> 'key',fetchImpl:async(url)=>{calls.push(url);return response(calls.length===1?{models:[modelInfo,{name:'models/embedding',supportedGenerationMethods:['embedContent']}],nextPageToken:'token / query'}:{models:[{...modelInfo,name:'models/other-stable'}]});}});

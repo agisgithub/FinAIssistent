@@ -21,6 +21,7 @@ const nameOK = v => typeof v === 'string' && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.tes
 const idOK = v => typeof v === 'string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(v);
 const count = v => Number.isSafeInteger(v) && v >= 0 ? v : null;
 const fail = (code = 'CHAT_INVALID_RESPONSE') => { throw new AppError(code); };
+const GEMINI_RETRY_DELAYS = Object.freeze([250, 750]);
 function jsonValue(value, depth = 0) {
   if (depth > 24) return false;
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return true;
@@ -118,11 +119,12 @@ function observedUsage(data, provider) {
 }
 
 export class ChatProviders {
-  constructor(config = {}, {fetchImpl = fetch, resolveSecret} = {}) {
+  constructor(config = {}, {fetchImpl = fetch, resolveSecret, sleepImpl} = {}) {
     this.assistant=validateAssistantConfig(config.assistant); this.ollama=validateOllamaConfig(config.ollama); this.gemini=validateGeminiConfig(config.gemini);
     if(this.gemini.enabled&&[config.telegram?.tokenRef,config.actual?.passwordRef,config.actual?.encryptionPasswordRef,config.backup?.keyRef].includes(this.gemini.apiKeyRef)) fail('CONFIG_INVALID');
     this.external=config.privacy?.externalProviders === true; this.fetch=fetchImpl;
     this.resolveSecret=resolveSecret ?? secretResolver(config.secretDir);
+    this.sleep=sleepImpl ?? (milliseconds=>new Promise(resolve=>setTimeout(resolve,milliseconds)));
   }
   settings(provider) {
     if (!this.assistant.enabled) fail('CHAT_DISABLED');
@@ -142,16 +144,27 @@ export class ChatProviders {
         if(typeof key!=='string'||!key||/[\s\0]/.test(key)||key.length>16384) fail('SECRET_UNAVAILABLE');
       }
       const request=async(endpoint,body)=>{
-        if(controller.signal.aborted) fail(timeout);
-        const response=await this.fetch((provider==='gemini'?API:c.url)+endpoint,{method:body?'POST':'GET',headers:{...(body?{'content-type':'application/json'}:{}),...(key?{'x-goog-api-key':key}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal,redirect:'error'});
-        if(!response.ok) {
-          if(provider==='gemini'&&response.status===429) fail('GEMINI_RATE_LIMITED');
-          if(provider==='gemini'&&response.status>=400&&response.status<500) fail('GEMINI_REJECTED');
-          fail(provider==='gemini'?'GEMINI_UNAVAILABLE':'OLLAMA_UNAVAILABLE');
+        for(let attempt=0;;attempt++) {
+          if(controller.signal.aborted) fail(timeout);
+          let response;
+          try {
+            response=await this.fetch((provider==='gemini'?API:c.url)+endpoint,{method:body?'POST':'GET',headers:{...(body?{'content-type':'application/json'}:{}),...(key?{'x-goog-api-key':key}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:controller.signal,redirect:'error'});
+          } catch(error) {
+            if(controller.signal.aborted) fail(timeout);
+            if(provider==='gemini'&&attempt<GEMINI_RETRY_DELAYS.length) {await this.sleep(GEMINI_RETRY_DELAYS[attempt]);continue;}
+            throw error;
+          }
+          if(!response.ok) {
+            const transient=provider==='gemini'&&(response.status===408||response.status===429||response.status>=500);
+            const code=provider==='gemini'?(response.status===401?'GEMINI_AUTH_FAILED':response.status===429?'GEMINI_RATE_LIMITED':response.status===408||response.status>=500?'GEMINI_UNAVAILABLE':'GEMINI_REJECTED'):'OLLAMA_UNAVAILABLE';
+            try {await response.body?.cancel();} catch {}
+            if(transient&&attempt<GEMINI_RETRY_DELAYS.length) {await this.sleep(GEMINI_RETRY_DELAYS[attempt]);continue;}
+            fail(code);
+          }
+          let data; try {data=await readJsonLimited(response,c.maxResponseBytes);} catch {fail('CHAT_INVALID_RESPONSE');}
+          if(!object(data)||data.error||!jsonValue(data)) fail('CHAT_INVALID_RESPONSE');
+          return data;
         }
-        let data; try {data=await readJsonLimited(response,c.maxResponseBytes);} catch {fail('CHAT_INVALID_RESPONSE');}
-        if(!object(data)||data.error||!jsonValue(data)) fail('CHAT_INVALID_RESPONSE');
-        return data;
       };
       return work(request,c);
     };

@@ -35,8 +35,8 @@ test('model tool contract returns authoritative chart immediately and long ordin
   const chart = await f.send('Mostre a evolução mensal de Consumo.');
   assert.equal(round, 1); assert.equal(chart.photo.type, 'image/png'); assert.equal(f.executions[0].name, 'monthly_spending_series');
   const concise = await f.send('Explique de forma geral.');
-  assert.ok(concise.text.length <= 1600); assert.match(concise.text, /Resposta resumida/);
-  assert.match(f.calls.at(-1).messages[0].content, /no máximo oito linhas/);
+  assert.ok(concise.text.length <= 600); assert.ok(concise.text.split('\n').length <= 6); assert.match(concise.text, /Resposta resumida/);
+  assert.match(f.calls.at(-1).messages[0].content, /no máximo seis linhas/); assert.match(f.calls.at(-1).messages[0].content, /sem preâmbulo/);
 });
 
 test('compound graph and goal request completes both tools and keeps the chart in the final response', async t => {
@@ -95,11 +95,20 @@ test('compound monthly choice and companion proposal preserve both authoritative
   });
 });
 
-test('concise conversation formatter enforces eight physical lines', () => {
+test('concise conversation formatter enforces six physical lines and a short single paragraph', () => {
   const result = conciseConversationText(Array.from({ length: 20 }, (_, index) => `linha ${index + 1}`).join('\n'));
-  assert.equal(result.split('\n').length, 8);
+  assert.equal(result.split('\n').length, 6);
   assert.match(result, /Resposta resumida/);
-  assert.doesNotMatch(result, /linha 8/);
+  assert.doesNotMatch(result, /linha 6/);
+  const paragraph = conciseConversationText('x'.repeat(1500));
+  assert.ok(paragraph.length <= 600); assert.match(paragraph, /Resposta resumida/);
+});
+
+test('authoritative chart choices without a photo are never shortened by the narrative formatter', async t => {
+  const choices = Array.from({ length: 12 }, (_, index) => `Opção ${index + 1}: Mercado — Grupo ${index + 1}`).join('\n');
+  const f = fixture(t, () => { throw new Error('model must not run'); }, () => ({ text: choices }));
+  const response = await f.send('Me dê o gráfico de gastos dos últimos 6 meses para Mercado.');
+  assert.equal(response.text, choices); assert.doesNotMatch(response.text, /Resposta resumida/);
 });
 
 function seriesMessage(months, { wide = false } = {}) {

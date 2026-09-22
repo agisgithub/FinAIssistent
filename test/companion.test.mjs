@@ -110,7 +110,7 @@ test('closed companion tools prepare a visible proposal and persist only after e
   assert.doesNotMatch(f.store.db.prepare('SELECT assistant_text FROM conversation_turns WHERE source_job_id=?').get(listing.job.id).assistant_text, new RegExp(memoryId));
   assert.throws(() => companion.execute('record_financial_memory', { kind: 'financial_note', subject: 'sem correlação' }, { identity: f.identity, job: queued.job }), { code: 'INPUT_INVALID' });
   assert.match(seen[0].messages[0].content, /sem vergonha, culpa/);
-  assert.match(CONVERSATION_SYSTEM, /no máximo oito linhas/);
+  assert.match(CONVERSATION_SYSTEM, /no máximo seis linhas/);
   const manage = FINANCE_TOOL_DEFINITIONS.find(tool => tool.name === 'manage_financial_goal');
   assert.ok(manage); assert.equal(Object.hasOwn(manage.parameters.properties, 'goalId'), false);
   assert.ok(FINANCE_TOOL_DEFINITIONS.some(tool => tool.name === 'get_companion_context'));
