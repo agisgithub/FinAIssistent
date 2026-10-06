@@ -3,7 +3,9 @@ node_modules/
 .npm-cache/
 .private/
 data/
-secrets/
+/secrets/
+!/src/secrets/
+!/src/secrets/*.mjs
 config.json
 work/
 outputs/

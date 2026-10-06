@@ -11,7 +11,7 @@ COPY migrations ./migrations
 COPY scripts ./scripts
 COPY test ./test
 COPY portable ./portable
-COPY config.docker.example.json compose.yaml compose.portable.yaml Dockerfile ./
+COPY config.docker.example.json compose.yaml compose.portable.yaml Dockerfile .gitignore ./
 RUN mkdir -p /app/work && chown -R node:node /app
 USER node
 CMD ["npm", "test"]

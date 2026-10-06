@@ -45,3 +45,12 @@ test('portable: Telegram requires deliberate activation',async()=>{
   const cli=await readFile(new URL('../portable/finai.mjs',import.meta.url),'utf8');
   assert.match(cli,/SOURCE_BOT_STOPPED/);
 });
+
+test('portable: secret files are ignored without excluding the resolver source',async()=>{
+  const ignore=await readFile(new URL('../.gitignore',import.meta.url),'utf8');
+  assert.match(ignore,/^\/secrets\/$/m);
+  assert.match(ignore,/^!\/src\/secrets\/$/m);
+  assert.doesNotMatch(ignore,/^secrets\/$/m);
+  const source=await readFile(new URL('../src/secrets/resolver.mjs',import.meta.url),'utf8');
+  assert.match(source,/export/);
+});
