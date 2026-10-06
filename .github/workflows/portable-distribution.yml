@@ -1,0 +1,24 @@
+name: Portable distribution
+on:
+  push:
+    paths: ['portable-release/**', '.github/workflows/portable-distribution.yml']
+  pull_request:
+    paths: ['portable-release/**', '.github/workflows/portable-distribution.yml']
+permissions:
+  contents: read
+jobs:
+  portable:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: portable-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - run: node portable/finai.mjs help
+      - run: docker compose -f compose.portable.yaml config --quiet
+      - run: docker build --target verify -t finaig-portable:verify .
+      - run: docker run --rm --network none finaig-portable:verify
+      - run: docker build --target runtime -t finaig-portable:runtime .
+      - run: docker build --build-arg APP_IMAGE=finaig-portable:runtime -f portable/Dockerfile.tools -t finaig-portable:tools .

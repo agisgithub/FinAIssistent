@@ -1,0 +1,6 @@
+ARG APP_IMAGE=finaig:portable-local
+FROM ${APP_IMAGE}
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
+COPY portable /app/portable
+ENTRYPOINT ["node", "/app/portable/helper.mjs"]

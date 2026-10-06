@@ -1,0 +1,53 @@
+name: ${FINAI_PROJECT:-finaig}
+services:
+  actual:
+    image: actualbudget/actual-server:26.9.0@sha256:552beab3dec8c93d46b8b9245612d63c3f123b8a45063a474f53e229b17621d3
+    restart: unless-stopped
+    environment: { TZ: America/Sao_Paulo }
+    ports: ["${FINAI_BIND:-127.0.0.1}:${FINAI_ACTUAL_PORT:-5006}:5006"]
+    volumes: [actual-data:/data]
+  actual-aig:
+    image: actualbudget/actual-server:26.9.0@sha256:552beab3dec8c93d46b8b9245612d63c3f123b8a45063a474f53e229b17621d3
+    restart: unless-stopped
+    environment: { TZ: America/Sao_Paulo }
+    ports: ["${FINAI_BIND:-127.0.0.1}:${FINAI_AIG_PORT:-5007}:5006"]
+    volumes: [aig-data:/data]
+  ollama:
+    image: ollama/ollama:0.33.2@sha256:020e4134285e2ef4d8fd801234176de3b4faadc992a3eb06c8e66a2f9d4c4ba2
+    restart: unless-stopped
+    environment: { OLLAMA_NO_CLOUD: "1", OLLAMA_HOST: "0.0.0.0:11434" }
+    ports: ["127.0.0.1:${FINAI_OLLAMA_PORT:-11434}:11434"]
+    volumes: [ollama-data:/root/.ollama]
+  bot:
+    profiles: [telegram]
+    image: ${FINAI_PROJECT:-finaig}:portable-local
+    restart: unless-stopped
+    init: true
+    read_only: true
+    user: "1000:1000"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    stop_grace_period: 150s
+    command: [node, src/onboarding/main.mjs]
+    environment:
+      CONFIG_FILE: /settings/config.json
+      TZ: America/Sao_Paulo
+      ONBOARDING_PUBLIC_URL: ${FINAI_PUBLIC_URL:-https://localhost:3443}
+      ONBOARDING_PORT: "3443"
+      ONBOARDING_DAILY_BASE: ${FINAI_DAILY_BASE:-financa-hml2}
+      ONBOARDING_PILOT_UNTIL: ${FINAI_PILOT_UNTIL:-1970-01-01T00:00:00Z}
+      ONBOARDING_ACTUAL_URLS: http://actual:5006,http://actual-aig:5006
+      FINAI_LOCAL_OLLAMA_HOST: ollama
+    ports: ["${FINAI_BIND:-127.0.0.1}:${FINAI_WEB_PORT:-3443}:3443"]
+    volumes: [settings:/settings:ro, state:/data, actual-cache:/data/actual]
+    tmpfs: ["/tmp:rw,nosuid,size=256m,uid=1000,gid=1000,mode=0700"]
+    depends_on: [actual, actual-aig, ollama]
+volumes:
+  actual-data: { name: "${FINAI_PROJECT:-finaig}_actual-data" }
+  aig-data: { name: "${FINAI_PROJECT:-finaig}_aig-data" }
+  state: { name: "${FINAI_PROJECT:-finaig}_state" }
+  settings: { name: "${FINAI_PROJECT:-finaig}_settings" }
+  actual-cache: { name: "${FINAI_PROJECT:-finaig}_actual-cache" }
+  ollama-data: { name: "${FINAI_PROJECT:-finaig}_ollama-data" }
