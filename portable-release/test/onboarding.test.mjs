@@ -1,0 +1,113 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import path from 'node:path';
+import {randomBytes,randomUUID} from 'node:crypto';
+import {OnboardingStore} from '../src/onboarding/store.mjs';
+import {buildRegistration,webSettings} from '../src/onboarding/settings.mjs';
+import {RegistrationService} from '../src/onboarding/service.mjs';
+import {routeGatewayUpdate,privateSender} from '../src/onboarding/gateway.mjs';
+import {createWebHandler} from '../src/onboarding/http.mjs';
+import {validateConfig} from '../src/config.mjs';
+import {CompanionService} from '../src/companion/service.mjs';
+import {ConversationStore} from '../src/conversation/store.mjs';
+import {createCommandHandler} from '../src/telegram/commands.mjs';
+import {inputConfig,tempDirectory,memoryStore,update} from './helpers.mjs';
+
+const form=()=>({displayName:'Teste',serverURL:'http://localhost:5006',budgetId:'synthetic-only',actualPassword:' test password ',encryptionPassword:'',apiKey:'synthetic-gemini-key',provider:'gemini',model:'gemini-2.5-flash',timezone:'America/Sao_Paulo',allowEdits:true,cloudConsent:true});
+function fixture(t){
+  let now=Date.parse('2026-09-23T12:00:00Z');
+  const root=tempDirectory(t),base=validateConfig({...inputConfig(),dataDir:path.join(root,'data'),secretDir:path.join(root,'secrets')});
+  const store=new OnboardingStore(':memory:',randomBytes(32),{now:()=>now});t.after(()=>store.close());
+  const settings=webSettings(base,{ONBOARDING_PUBLIC_URL:'https://10.11.46.109:3443',ONBOARDING_TEMP_SECRET_DIR:path.join(root,'transient')});
+  const invite=(userId=456)=>store.createInvite({userId,chatId:userId,displayName:`Pessoa ${userId}`});
+  return {base,store,settings,invite,advance:ms=>{now+=ms;}};
+}
+test('onboarding invitations expire, are one-use, bound to identity and lock after five wrong codes',t=>{
+  const f=fixture(t),one=f.invite();
+  assert.equal(f.store.invite(one.token).user_id,456);
+  assert.throws(()=>f.invite(),{code:'RATE_LIMIT'});
+  for(let n=0;n<5;n++)assert.throws(()=>f.store.claim(one.token,'000000'),{code:'CODE_INVALID'});
+  assert.throws(()=>f.store.claim(one.token,one.code),{code:'LINK_EXPIRED'});
+  f.advance(31000);const next=f.invite();f.store.claim(next.token,next.code);
+  assert.throws(()=>f.store.claim(next.token,next.code),{code:'LINK_EXPIRED'});
+  const row=f.store.invite(next.token,{validating:true});
+  const payload=buildRegistration(form(),row,f);
+  assert.throws(()=>f.store.save(next.token,{...payload,config:{...payload.config,telegram:{...payload.config.telegram,userId:777}}}),{code:'IDENTITY_MISMATCH'});
+  f.store.save(next.token,payload);
+  assert.throws(()=>f.store.invite(next.token),{code:'LINK_EXPIRED'});
+  assert.equal(f.store.tenant(456).secrets['onboard-actual-principal'],' test password ');
+  const raw=f.store.db.prepare('SELECT sealed FROM tenants').get().sealed;
+  assert.ok(!raw.includes('synthetic-gemini-key'));assert.throws(()=>f.store.unseal(raw,789));
+  const third=f.invite(789);f.advance(30*60000);assert.throws(()=>f.store.invite(third.token),{code:'LINK_EXPIRED'});
+});
+test('tenant configs isolate caches and secrets; owner preserves both budgets and backup keys',t=>{
+  const f=fixture(t),one=f.invite(),two=f.invite(789);
+  const a=buildRegistration(form(),f.store.invite(one.token),f),b=buildRegistration(form(),f.store.invite(two.token),f);
+  assert.notEqual(a.config.dataDir,b.config.dataDir);assert.notEqual(a.config.secretDir,b.config.secretDir);
+  assert.notEqual(a.config.householdId,b.config.householdId);assert.equal(a.config.companion.autoCategorizeHighConfidence,false);
+  assert.equal(a.config.actual.budgetId,'synthetic-only');assert.equal(a.config.dryRun,false);
+  assert.throws(()=>buildRegistration({...form(),cloudConsent:false},f.store.invite(one.token),f),{code:'FORM_INVALID'});
+  assert.throws(()=>buildRegistration({...form(),serverURL:'http://169.254.169.254'},f.store.invite(one.token),f),{code:'FORM_INVALID'});
+  const principal={...inputConfig().actual},hml={...principal,budgetId:'synthetic-hml',passwordRef:'hml-password'};
+  const base=validateConfig({...f.base,actual:{defaultBase:'financa-hml2',bases:{principal,'financa-hml2':hml}},backup:{keyRef:'old-backup'}});
+  const admin=f.invite(123),payload=buildRegistration({...form(),budgetId:'synthetic-hml',actualPassword:''},f.store.invite(admin.token),{...f,base,secrets:{'hml-password':'hml-secret','actual-password':'principal-secret','old-backup':'old-backup-value'}});
+  assert.equal(payload.config.actual.bases.principal.budgetId,'synthetic-budget');
+  assert.equal(payload.config.actual.bases.principal.passwordRef,'actual-password');
+  assert.equal(payload.config.backup.keyRef,'old-backup');
+  assert.equal(payload.secrets['onboard-actual-financa-hml2'],'hml-secret');
+  assert.throws(()=>buildRegistration(form(),f.store.invite(admin.token),{...f,base}),{code:'FORM_INVALID'});
+});
+test('registration tests credentials before saving, retries failures and activates once',async t=>{
+  const f=fixture(t),inv=f.invite(),calls=[];let fail=true;
+  const service=new RegistrationService({...f,effectiveConfig:()=>null,validateConnection:async payload=>{calls.push('validate');assert.equal(payload.config.telegram.userId,456);if(fail)throw Error('synthetic-failure');},activate:async p=>{calls.push('activate');assert.equal(p.userId,456);}});
+  await assert.rejects(service.register(inv.token,inv.code,form()),{code:'REGISTRATION_FAILED'});
+  assert.equal(f.store.tenant(456),null);assert.equal(f.store.invite(inv.token).state,'pending');
+  fail=false;assert.equal((await service.register(inv.token,inv.code,form())).ok,true);
+  assert.deepEqual(calls,['validate','validate','activate']);
+  await assert.rejects(service.register(inv.token,inv.code,form()),{code:'LINK_EXPIRED'});
+  assert.equal(f.store.tenant(456).provider,'gemini');
+  assert.match(f.store.tenant(456).secrets['onboard-backup-key'],/^[a-f0-9]{64}$/);
+  f.advance(31000);const next=f.invite();assert.equal(service.defaults(next.token).budgetId,'synthetic-only');
+});
+test('gateway delivers separate private links exactly once and never routes another user to owner',t=>{
+  const f=fixture(t),accepted=[];
+  const context={...f,getRuntime:id=>id===123?{router:{accept:event=>accepted.push(event)}}:null};
+  const u=update(1,'/start',{from:{id:456,is_bot:false,first_name:'Ana'},chat:{id:456,type:'private'}});
+  routeGatewayUpdate(u,context);routeGatewayUpdate(u,context);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM invites').get().n,1);
+  const row=f.store.claimDelivery();assert.equal(row.chat_id,456);assert.match(row.payload.text,/cadastro#/);
+  assert.equal(f.store.claimDelivery(),null);assert.equal(accepted.length,0);
+  routeGatewayUpdate(update(2,'/resumo'),context);assert.equal(accepted.length,1);
+  assert.equal(privateSender(update(3,'/start',{chat:{id:-123,type:'group'}})),null);
+  routeGatewayUpdate(update(4,'/cadastro',{forward_origin:{type:'user'}}),context);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM invites').get().n,1);
+  routeGatewayUpdate(update(5,'/cadastro'),context);assert.equal(f.store.claimDelivery().chat_id,123);
+  assert.equal(f.store.cursor(),6);
+});
+test('web rejects missing origin, serves a no-store CSP form and never returns saved secrets',async t=>{
+  const f=fixture(t),inv=f.invite(),service=new RegistrationService({...f,activate:async()=>{},validateConnection:async()=>{},effectiveConfig:()=>null});
+  const server=http.createServer(createWebHandler({service,settings:f.settings}));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>{server.closeAllConnections();server.close();});
+  const url=`http://127.0.0.1:${server.address().port}`;
+  const page=await fetch(url+'/cadastro');assert.equal(page.status,200);assert.equal(page.headers.get('cache-control'),'no-store');assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'none'/);
+  const html=await page.text();assert.match(html,/<option value="ollama">/);assert.match(html,/name="dailyReconciliation"/);assert.match(html,/name="reconciliationTime"/);
+  const rejected=await fetch(url+'/api/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:inv.token})});assert.equal(rejected.status,403);
+  const session=await fetch(url+'/api/session',{method:'POST',headers:{'content-type':'application/json',origin:f.settings.publicUrl},body:JSON.stringify({token:inv.token})});
+  assert.equal(session.status,200);const body=await session.json();assert.equal(body.hasPassword,false);assert.equal(body.budgetId,'');assert.equal(body.displayName,'Pessoa 456');assert.ok(!Object.hasOwn(body,'secrets'));
+});
+test('explicit natural memories use confirmation, reference previous context and forget without retaining the fact',async t=>{
+  const {config,store,identity}=memoryStore(t),companion=new CompanionService({config,store});
+  const conversation=new ConversationStore(store,config),handler=createCommandHandler({config,store,actual:{},companionService:companion});
+  const send=async text=>{
+    const request={type:'message',text,identity};store.enqueueJob({kind:'command',payload:request,dedupeKey:randomUUID()});const job=store.claimJob();
+    const response=await handler(request,job);if(store.db.prepare('SELECT state FROM jobs WHERE id=?').get(job.id).state==='running')store.completeJob(job.id,response);return response;
+  };
+  assert.match((await send('lembre-se disso')).text,/O que devo guardar/);
+  const proposal=await send('Lembre-se de que recebo meu salário no dia 5.');assert.match(proposal.text,/NADA FOI GRAVADO/);assert.equal(companion.repository.listMemories(identity).length,0);
+  const nonce=proposal.replyMarkup.inline_keyboard[0][0].callback_data.slice(3);
+  assert.match((await send(`/confirmar_companion ${nonce}`)).text,/Memória registrada/);assert.equal(companion.repository.listMemories(identity)[0].subject,'recebo meu salário no dia 5.');
+  assert.match((await send('esqueça isso')).text,/contexto ativo/);assert.equal(companion.repository.listMemories(identity).length,0);
+  assert.doesNotMatch(JSON.stringify(conversation.history()),/recebo meu salário/);
+  assert.equal(companion.naturalMemory({type:'message',text:'Como guardar uma informação?',identity},{}),null);
+});

@@ -1,0 +1,36 @@
+{
+  "householdId": "home",
+  "timezone": "America/Sao_Paulo",
+  "currency": "BRL",
+  "dataDir": "./data",
+  "secretDir": "./secrets",
+  "telegram": { "userId": 123456789, "chatId": 123456789, "tokenRef": "telegram-token" },
+  "actual": {
+    "defaultBase": "principal",
+    "bases": {
+      "principal": {
+        "serverURL": "http://actual:5006",
+        "budgetId": "REPLACE_WITH_SYNC_ID",
+        "passwordRef": "actual-password",
+        "encryptionPasswordRef": null
+      }
+    }
+  },
+  "privacy": { "externalProviders": false },
+  "assistant": { "enabled": true, "defaultProvider": "ollama", "historyTtlMinutes": 1440, "maxTurns": 12, "maxToolRounds": 4, "maxToolCalls": 8, "maxContextChars": 24000, "maxToolResultChars": 8000, "outputTokens": 1024 },
+  "companion": { "enabled": true, "transactionMonitorEnabled": false, "autoCategorizeHighConfidence": false, "memoryDefaultTtlDays": 180, "maxContextMemories": 12, "maxContextGoals": 8, "maxContextChars": 4000 },
+  "gemini": { "enabled": false, "model": "gemini-3.8-flash", "apiKeyRef": null, "timeoutMs": 60000, "outputTokens": 4096 },
+  "backup": { "keyRef": null },
+  "categorization": { "rules": [] },
+  "ollama": {
+    "enabled": false,
+    "url": "http://127.0.0.1:11434",
+    "model": null,
+    "localOnlyConfirmed": false,
+    "allowPrivateAddress": false,
+    "timeoutMs": 30000,
+    "contextTokens": 32768,
+    "outputTokens": 256
+  },
+  "dryRun": true
+}

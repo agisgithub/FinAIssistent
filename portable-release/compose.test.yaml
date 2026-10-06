@@ -1,0 +1,4 @@
+services:
+  tests:
+    build: { context: ., target: verify }
+    network_mode: none

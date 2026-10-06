@@ -1,0 +1,29 @@
+import { ERROR_CODES } from '../errors.mjs';
+
+const reasons = Object.freeze({
+  category_command: 'comando local de categorização',
+  operation_status: 'consulta ao registro da operação',
+  operation_reconcile: 'releitura do estado atual no Actual',
+  approval_received: 'confirmação de uso único recebida',
+  operation_result: 'registro do resultado da operação',
+  operation_recovery: 'recuperação do registro após reinício',
+  command_error: 'falha no processamento do comando',
+  report_preferences: 'preferências locais de relatório e alertas',
+  daily_report: 'relatório determinístico solicitado',
+  alert_transition: 'mudança de severidade confirmada em leitura completa',
+  bill_command: 'cadastro e calendário locais de recorrências',
+  bill_reminder: 'lembrete do calendário local confirmado',
+  bill_variation: 'variação em lançamento compatível; pagamento não confirmado'
+});
+
+// This wrapper is used before durable enqueue as well as at the action boundary.
+// Metadata remains an internal marker. Successful deterministic responses need
+// no diagnostic footer; a real failure retains its allowlisted code in the text.
+export function withActionMetadata(message, { reason = 'category_command', durationMs = null, failure = null } = {}) {
+  if (message.metadata?.provider === 'deterministic' && Object.hasOwn(reasons, message.metadata.reason)) return message;
+  const safeReason = Object.hasOwn(reasons, reason) ? reason : 'category_command';
+  const duration = Number.isSafeInteger(durationMs) && durationMs >= 0 ? durationMs : null;
+  const code = failure == null ? null : ERROR_CODES.has(failure) ? failure : 'INTERNAL_ERROR';
+  const metadata = { provider: 'deterministic', reason: safeReason, durationMs: duration, failure: code, usage: null };
+  return { ...message, text: message.text + (code ? `\n\nFalha: ${code}.` : ''), metadata };
+}
